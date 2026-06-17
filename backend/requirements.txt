@@ -7,3 +7,4 @@ markdown
 bcrypt
 bleach
 Pillow
+coverage

@@ -113,6 +113,14 @@ cd backend
 python -m unittest discover tests
 ```
 
+Backend coverage:
+
+```bash
+cd backend
+python -m coverage run -m unittest discover tests
+python -m coverage report -m
+```
+
 Frontend lint and production build:
 
 ```bash
@@ -120,6 +128,28 @@ cd frontend
 npm run lint
 npm run build
 ```
+
+Cypress E2E:
+
+```bash
+cd backend
+python app.py
+```
+
+```bash
+cd frontend
+npm run dev
+npm run cy:run
+```
+
+`npm run cy:run` / `npm run cy:open` go through `scripts/run-cypress.mjs`, which
+clears `ELECTRON_RUN_AS_NODE` before launching Cypress. VS Code's integrated
+terminal sets that variable, and it otherwise stops Cypress's Electron binary
+from starting.
+
+> Note: the backend dev server binds `host="::1"` (IPv6 loopback) so the browser's
+> `localhost` reaches it on Windows — a local-development/Cypress setting only. For
+> AWS/EC2 deployment use Gunicorn + Nginx (or `host="0.0.0.0"`), not `::1`.
 
 ## Documentation
 

@@ -69,6 +69,7 @@ export default function TopBar() {
 
           {currentUser && (
             <Button
+              data-testid="nav-profile"
               component={Link}
               to={`/profile/${currentUser.username}`}
               startIcon={
@@ -168,7 +169,7 @@ export default function TopBar() {
             ))}
 
             {currentUser ? (
-              <Button sx={{ my: 2, color: 'orange' }} onClick={() => setLogoutOpen(true)}>
+              <Button data-testid="nav-logout" sx={{ my: 2, color: 'orange' }} onClick={() => setLogoutOpen(true)}>
                 Logout
               </Button>
             ) : (
@@ -188,7 +189,7 @@ export default function TopBar() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setLogoutOpen(false)}>Cancel</Button>
-          <Button onClick={() => handleLogout(false)}>Logout from this device</Button>
+          <Button data-testid="logout-current-device" onClick={() => handleLogout(false)}>Logout from this device</Button>
           <Button color="error" onClick={() => handleLogout(true)}>
             Logout from all devices
           </Button>

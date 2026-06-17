@@ -5,9 +5,10 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-# sys.path bootstrap (mirrors the other test files so this runs standalone too).
 HERE = Path(__file__).resolve().parent
-for _p in (HERE, HERE.parent):
+TESTS_DIR = HERE.parent
+BACKEND_DIR = TESTS_DIR.parent
+for _p in (BACKEND_DIR, TESTS_DIR, HERE):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 

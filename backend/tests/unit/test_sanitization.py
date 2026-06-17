@@ -4,9 +4,12 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+HERE = Path(__file__).resolve().parent
+TESTS_DIR = HERE.parent
+BACKEND_DIR = TESTS_DIR.parent
+for _p in (BACKEND_DIR, TESTS_DIR, HERE):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from app import sanitize_html, to_html  # noqa: E402
 

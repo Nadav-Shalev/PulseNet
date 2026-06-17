@@ -77,6 +77,7 @@ export default function LoginPage() {
             placeholder="you@example.com"
             value={email}
             onChange={e => setEmail(e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'login-email' } }}
             fullWidth
           />
           <TextField
@@ -85,9 +86,10 @@ export default function LoginPage() {
             placeholder="••••••••"
             value={password}
             onChange={e => setPassword(e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'login-password' } }}
             fullWidth
           />
-          <Button variant="contained" fullWidth onClick={handleLogin} disabled={submitting}>
+          <Button data-testid="login-submit" variant="contained" fullWidth onClick={handleLogin} disabled={submitting}>
             {submitting ? 'Logging in...' : 'Login'}
           </Button>
           <Divider>OR</Divider>

@@ -67,6 +67,7 @@ export default function SignupPage() {
             value={name}
             onChange={e => setName(e.target.value)}
             helperText="Optional — defaults to the part before @ in your email."
+            slotProps={{ htmlInput: { 'data-testid': 'signup-name' } }}
             fullWidth
           />
           <TextField
@@ -74,6 +75,7 @@ export default function SignupPage() {
             placeholder="A short bio (optional)"
             value={bio}
             onChange={e => setBio(e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'signup-bio' } }}
             multiline
             rows={2}
             fullWidth
@@ -83,6 +85,7 @@ export default function SignupPage() {
             placeholder="you@example.com"
             value={email}
             onChange={e => setEmail(e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'signup-email' } }}
             fullWidth
           />
           <TextField
@@ -91,6 +94,7 @@ export default function SignupPage() {
             placeholder="••••••••"
             value={password}
             onChange={e => setPassword(e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'signup-password' } }}
             fullWidth
           />
           <TextField
@@ -99,9 +103,10 @@ export default function SignupPage() {
             placeholder="••••••••"
             value={repeat}
             onChange={e => setRepeat(e.target.value)}
+            slotProps={{ htmlInput: { 'data-testid': 'signup-repeat-password' } }}
             fullWidth
           />
-          <Button variant="contained" fullWidth onClick={handleSignup} disabled={submitting}>
+          <Button data-testid="signup-submit" variant="contained" fullWidth onClick={handleSignup} disabled={submitting}>
             {submitting ? 'Signing up...' : 'Sign Up'}
           </Button>
           <Typography variant="body2" align="center">

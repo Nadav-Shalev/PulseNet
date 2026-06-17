@@ -210,6 +210,60 @@ def _user_shape(row):
     }
 
 
+def _hash_password(password):
+    # bcrypt input is bytes; the salt is generated inside the hash output.
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password, password_hash):
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
+
+def _validate_signup_payload(data):
+    data = data or {}
+    payload = {
+        "name": (data.get("name") or "").strip(),
+        "username": (data.get("username") or "").strip(),
+        "email": (data.get("email") or "").strip(),
+        "bio": (data.get("bio") or "").strip(),
+        "password": data.get("password") or "",
+    }
+
+    if not payload["name"] or not payload["username"] or not payload["email"]:
+        return payload, "name, username, and email are required"
+
+    if not payload["password"]:
+        return payload, "password is required"
+
+    if len(payload["name"]) > 100:
+        return payload, "Name must be 100 characters or fewer"
+
+    if len(payload["username"]) > 100:
+        return payload, "Username must be 100 characters or fewer"
+
+    if len(payload["email"]) > 100:
+        return payload, "Email must be 100 characters or fewer"
+
+    if not re.match(r'^[a-zA-Z0-9_.]+$', payload["username"]):
+        return payload, "Username may only contain letters, numbers, underscores, and dots"
+
+    if "@" not in payload["email"] or "." not in payload["email"]:
+        return payload, "Invalid email format"
+
+    return payload, None
+
+
+def _validate_login_payload(data):
+    data = data or {}
+    payload = {
+        "email": (data.get("email") or "").strip(),
+        "password": data.get("password") or "",
+    }
+    if not payload["email"] or not payload["password"]:
+        return payload, "email and password are required"
+    return payload, None
+
+
 def _delete_expired_sessions(cursor):
     """Remove expired active sessions.
 
@@ -804,36 +858,17 @@ def create_user():
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
-    data     = request.get_json() or {}
-    name     = (data.get("name") or "").strip()
-    username = (data.get("username") or "").strip()
-    email    = (data.get("email") or "").strip()
-    bio      = (data.get("bio") or "").strip()
-    password = data.get("password") or ""
+    payload, validation_error = _validate_signup_payload(request.get_json() or {})
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
 
-    if not name or not username or not email:
-        return jsonify({"error": "name, username, and email are required"}), 400
+    name     = payload["name"]
+    username = payload["username"]
+    email    = payload["email"]
+    bio      = payload["bio"]
+    password = payload["password"]
 
-    if not password:
-        return jsonify({"error": "password is required"}), 400
-
-    if len(name) > 100:
-        return jsonify({"error": "Name must be 100 characters or fewer"}), 400
-
-    if len(username) > 100:
-        return jsonify({"error": "Username must be 100 characters or fewer"}), 400
-
-    if len(email) > 100:
-        return jsonify({"error": "Email must be 100 characters or fewer"}), 400
-
-    if not re.match(r'^[a-zA-Z0-9_.]+$', username):
-        return jsonify({"error": "Username may only contain letters, numbers, underscores, and dots"}), 400
-
-    if "@" not in email or "." not in email:
-        return jsonify({"error": "Invalid email format"}), 400
-
-    # bcrypt input is bytes; the salt is generated inside the hash output.
-    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    password_hash = _hash_password(password)
     avatar = f"{DICEBEAR_URL}?seed={username}"
 
     conn   = get_db_connection()
@@ -884,12 +919,11 @@ def login():
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
-    data     = request.get_json() or {}
-    email    = (data.get("email") or "").strip()
-    password = data.get("password") or ""
-
-    if not email or not password:
-        return jsonify({"error": "email and password are required"}), 400
+    payload, validation_error = _validate_login_payload(request.get_json() or {})
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+    email    = payload["email"]
+    password = payload["password"]
 
     conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -906,7 +940,7 @@ def login():
         conn.close()
         return jsonify({"error": "Invalid email or password"}), 401
 
-    if not bcrypt.checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+    if not _verify_password(password, user["password_hash"]):
         cursor.close()
         conn.close()
         return jsonify({"error": "Invalid email or password"}), 401
@@ -1278,4 +1312,12 @@ def test_db():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Bind to IPv6 loopback: on Windows "localhost" resolves to ::1 first, and the
+    # browser (and the Vite dev server) use ::1 — so the dev server must listen
+    # there or browser fetch() calls to http://localhost:5000 fail to connect.
+    #
+    # NOTE: host="::1" is a LOCAL-DEVELOPMENT / Cypress fix only — it binds IPv6
+    # loopback on this machine. For AWS/EC2 (or any real deployment) do NOT use
+    # "::1": serve behind a production WSGI server (Gunicorn) + Nginx, or bind
+    # host="0.0.0.0" to accept external traffic.
+    app.run(debug=True, host="::1", port=5000)

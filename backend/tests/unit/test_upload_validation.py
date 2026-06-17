@@ -6,9 +6,12 @@ from pathlib import Path
 from PIL import Image
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+HERE = Path(__file__).resolve().parent
+TESTS_DIR = HERE.parent
+BACKEND_DIR = TESTS_DIR.parent
+for _p in (BACKEND_DIR, TESTS_DIR, HERE):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from app import _validate_image_upload, MAX_UPLOAD_BYTES  # noqa: E402
 

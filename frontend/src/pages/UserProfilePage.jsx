@@ -119,10 +119,10 @@ export default function UserProfilePage() {
           {user.name?.[0] ?? '?'}
         </Avatar>
         <Box>
-          <Typography variant="h5" fontWeight={700}>{user.name}</Typography>
-          <Typography variant="body2" color="text.secondary">@{user.username}</Typography>
+          <Typography data-testid="profile-name" variant="h5" fontWeight={700}>{user.name}</Typography>
+          <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
           {user.bio && (
-            <Typography variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
+            <Typography data-testid="profile-bio" variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
               {user.bio}
             </Typography>
           )}

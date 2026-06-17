@@ -3,10 +3,15 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.coverage
+coverage.json
+htmlcov/
 
 # Node
 node_modules/
 dist/
+frontend/cypress/screenshots/
+frontend/cypress/videos/
 
 # Env
 .env
@@ -34,3 +39,5 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+*CLAUDE.md
