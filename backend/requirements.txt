@@ -1,0 +1,9 @@
+flask
+requests
+flask-cors
+python-dotenv
+mysql-connector-python
+markdown
+bcrypt
+bleach
+Pillow
