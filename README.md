@@ -1,4 +1,4 @@
-# PulseNet - Assignment 5
+# PulseNet
 
 PulseNet is a full-stack social network for developers. It has a React + Vite
 frontend, a Flask backend, and a MySQL database.
