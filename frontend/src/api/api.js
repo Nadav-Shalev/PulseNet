@@ -1,4 +1,5 @@
-const BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api').replace(/\/$/, '');
+import { BACKEND_URL } from './config.js';
+const BASE = BACKEND_URL;
 
 // credentials: 'include' makes the browser send/receive the session_id cookie
 // cross-origin (Vite :5173 → Flask :5000). Backend CORS allows this.
