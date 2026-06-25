@@ -18,6 +18,10 @@ frontend/cypress/videos/
 *.env
 !*.env.example
 
+# Secrets / SSH keys
+*.pem
+*.key
+
 # Logs
 *.log
 *_stdout.log
