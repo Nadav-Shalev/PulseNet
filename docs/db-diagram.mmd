@@ -5,6 +5,8 @@ erDiagram
     tags  ||--o{ posts_tags : "applied to"
     users ||--o{ follows    : "is follower"
     users ||--o{ follows    : "is followed"
+    users ||--o{ likes      : "likes"
+    posts ||--o{ likes      : "liked by"
 
     users {
         int     id            PK
@@ -50,5 +52,11 @@ erDiagram
     follows {
         int       follower_id  PK, FK
         int       following_id PK, FK
+        timestamp created_at
+    }
+
+    likes {
+        int       user_id    PK, FK
+        int       post_id    PK, FK
         timestamp created_at
     }

@@ -66,3 +66,15 @@ CREATE TABLE IF NOT EXISTS follows (
     CHECK (follower_id <> following_id)
 );
 CREATE INDEX idx_follows_following ON follows(following_id);
+
+-- A user likes a post (migration 001). Composite PK = one like per user per post;
+-- idx_likes_post serves per-post counts. Deleting a post or user removes its likes.
+CREATE TABLE IF NOT EXISTS likes (
+    user_id    INT NOT NULL,
+    post_id    INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, post_id),
+    INDEX idx_likes_post (post_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+);

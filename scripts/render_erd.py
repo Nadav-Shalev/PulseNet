@@ -40,7 +40,7 @@ from migrate import split_sql  # noqa: E402  (comment- and quote-aware SQL split
 # Where each table goes in the picture: columns left to right, each stacked top to bottom.
 LAYOUT = [
     ["follows", "users", "sessions"],
-    ["posts"],
+    ["posts", "likes"],
     ["posts_tags"],
     ["tags"],
 ]
@@ -54,6 +54,8 @@ LABELS = {
     ("posts_tags", "tag_id"): "applied to",
     ("follows", "follower_id"): "is follower",
     ("follows", "following_id"): "is followed",
+    ("likes", "user_id"): "likes",
+    ("likes", "post_id"): "liked by",
 }
 
 PNG_DIGEST_KEY = "Schema-SHA256"
