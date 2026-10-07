@@ -10,6 +10,8 @@ import Typography from '@mui/material/Typography';
 import Avatar from '@mui/material/Avatar';
 import Chip from '@mui/material/Chip';
 import Box from '@mui/material/Box';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { useTheme } from '@mui/material/styles';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -36,6 +38,8 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   // Per-card toggle: the card looks normal until the owner clicks the pencil.
   const [managing, setManaging] = useState(false);
   const navigate = useNavigate();
+  // Below sm (600px) the full post fills the screen instead of a narrow box.
+  const isPhone = useMediaQuery(useTheme().breakpoints.down('sm'));
 
   const handleOpen = async () => {
     setOpen(true);
@@ -91,7 +95,8 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
       <Card
         data-testid="post-card"
         sx={{
-          minWidth: 275,
+          minWidth: 0,
+          overflowWrap: 'anywhere',          // a long word or URL wraps instead of widening the card
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
@@ -232,7 +237,15 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
         </DialogActions>
       </Dialog>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth scroll="paper">
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isPhone}
+        scroll="paper"
+        data-testid="post-dialog"
+      >
         <DialogTitle sx={{ pr: 6 }}>
           {post?.title}
           <IconButton
@@ -253,6 +266,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
               sx={{
                 '& img': { maxWidth: '100%', height: 'auto', display: 'block', my: 1 },
                 '& pre': { overflowX: 'auto', p: 2, bgcolor: '#f5f5f5', borderRadius: 1 },
+                overflowWrap: 'anywhere',
                 '& code': { fontSize: '0.85em' },
                 '& h1,& h2,& h3': { mt: 2, mb: 1 },
                 lineHeight: 1.7,

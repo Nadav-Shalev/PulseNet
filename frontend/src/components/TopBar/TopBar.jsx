@@ -123,12 +123,12 @@ export default function TopBar() {
             >
               {pages.map(page => (
                 <MenuItem key={page.label} component={Link} to={page.to} onClick={handleCloseNavMenu}>
-                  <Typography textAlign="center">{page.label}</Typography>
+                  <Typography sx={{ textAlign: 'center' }}>{page.label}</Typography>
                 </MenuItem>
               ))}
               {currentUser && (
                 <MenuItem component={Link} to="/new-post" onClick={handleCloseNavMenu}>
-                  <Typography textAlign="center">+ New Post</Typography>
+                  <Typography sx={{ textAlign: 'center' }}>+ New Post</Typography>
                 </MenuItem>
               )}
               {currentUser && (
@@ -140,16 +140,16 @@ export default function TopBar() {
                   >
                     {currentUser.name?.[0] ?? '?'}
                   </Avatar>
-                  <Typography textAlign="center">Profile</Typography>
+                  <Typography sx={{ textAlign: 'center' }}>Profile</Typography>
                 </MenuItem>
               )}
               {currentUser ? (
                 <MenuItem onClick={() => { handleCloseNavMenu(); setLogoutOpen(true); }}>
-                  <Typography textAlign="center">Logout</Typography>
+                  <Typography sx={{ textAlign: 'center' }}>Logout</Typography>
                 </MenuItem>
               ) : (
                 <MenuItem component={Link} to="/login" onClick={handleCloseNavMenu}>
-                  <Typography textAlign="center">Login</Typography>
+                  <Typography sx={{ textAlign: 'center' }}>Login</Typography>
                 </MenuItem>
               )}
             </Menu>

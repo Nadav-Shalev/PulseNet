@@ -112,7 +112,11 @@ export default function UserProfilePage() {
 
   return (
     <Box sx={{ p: 2 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+      {/* Avatar above the details on phones, beside them from sm (600px) up. */}
+      <Box
+        data-testid="profile-header"
+        sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2, mb: 2 }}
+      >
         <Avatar
           src={user.profile_image || user.avatar}
           alt={user.name}
@@ -120,7 +124,7 @@ export default function UserProfilePage() {
         >
           {user.name?.[0] ?? '?'}
         </Avatar>
-        <Box>
+        <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
           <Typography data-testid="profile-name" variant="h5" fontWeight={700}>{user.name}</Typography>
           <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
           {user.bio && (
@@ -128,7 +132,7 @@ export default function UserProfilePage() {
               {user.bio}
             </Typography>
           )}
-          <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
             {countLink('followers', <><strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}</>)}
             {countLink('following', <><strong>{user.following_count ?? 0}</strong> following</>)}
             <Typography variant="body2" color="text.secondary">

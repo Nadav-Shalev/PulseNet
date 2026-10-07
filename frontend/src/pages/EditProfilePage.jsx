@@ -27,7 +27,7 @@ export default function EditProfilePage() {
   // Redirect to login once auth state is known and there's no user.
   useEffect(() => {
     if (authReady && !currentUser) navigate('/login');
-  }, [authReady, currentUser]);
+  }, [authReady, currentUser, navigate]);
 
   // Pre-fill the form from the current user.
   useEffect(() => {
@@ -77,9 +77,9 @@ export default function EditProfilePage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
       <Card sx={{ width: '100%', maxWidth: 520 }}>
-        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 4 }}>
+        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
           <Typography variant="h5" fontWeight={700}>Edit Profile</Typography>
 
           {success && (

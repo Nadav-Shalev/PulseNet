@@ -6,8 +6,9 @@ import TableRow from '@mui/material/TableRow';
 import User from './User';
 
 export default function Users({ users }) {
+  // Tighter cell padding on phones so the three columns fit in 375px.
   return (
-    <Table>
+    <Table data-testid="users-table" sx={{ '& th, & td': { px: { xs: 1, sm: 2 } } }}>
       <TableHead>
         <TableRow>
           <TableCell>User</TableCell>

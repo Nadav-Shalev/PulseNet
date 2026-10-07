@@ -46,9 +46,9 @@ export default function LoginPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6 }}>
-      <Card sx={{ minWidth: 340, maxWidth: 420, width: '100%' }}>
-        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 4 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+      <Card sx={{ maxWidth: 420, width: '100%' }}>
+        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
           <Typography variant="h5" fontWeight={700}>Welcome Back</Typography>
           <Typography variant="body2" color="text.secondary">
             Sign in to your account
