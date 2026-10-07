@@ -14,7 +14,10 @@ import {
 export default function Feed({ username, tag, feed, manage = false, emptyMessage = 'No posts yet.' }) {
   const [posts, setPosts] = useState([]);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  // Starts true: the infinite-scroll observer below attaches only once page 1 is
+  // in. Starting false let it see the (still empty) feed's sentinel and request
+  // page 2 at once, which dropped page 1 as stale and showed "No posts yet."
+  const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef(null);
 
