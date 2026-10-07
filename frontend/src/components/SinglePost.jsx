@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '@mui/material/Card';
 import CardActions from '@mui/material/CardActions';
@@ -21,7 +21,12 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
-import { fetchArticleById, deleteArticle, removePostTag } from '../api/api';
+import FavoriteIcon from '@mui/icons-material/Favorite';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import {
+  fetchArticleById, deleteArticle, removePostTag, likeArticle, unlikeArticle,
+} from '../api/api';
+import { UserContext } from '../context/UserContext';
 import { postTimeAgo } from '../utils/timeAgo';
 
 // `manage` enables owner-only controls (delete post, remove a hashtag). It is only
@@ -37,6 +42,12 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const [manageError, setManageError] = useState('');
   // Per-card toggle: the card looks normal until the owner clicks the pencil.
   const [managing, setManaging] = useState(false);
+  // Likes start from the feed's values; after a click the server's reply wins.
+  const [liked, setLiked] = useState(!!post?.liked_by_me);
+  const [likeCount, setLikeCount] = useState(post?.like_count ?? 0);
+  const [likeBusy, setLikeBusy] = useState(false);
+  const [likeError, setLikeError] = useState('');
+  const { currentUser, authReady } = useContext(UserContext);
   const navigate = useNavigate();
   // Below sm (600px) the full post fills the screen instead of a narrow box.
   const isPhone = useMediaQuery(useTheme().breakpoints.down('sm'));
@@ -61,6 +72,27 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
     } catch (err) {
       setManageError(err.message || 'Could not delete post.');
       setDeleting(false);
+    }
+  };
+
+  // Waits for the server like the Follow button does, so the count is always the
+  // real total (other readers' likes included). A visitor is sent to log in.
+  const handleToggleLike = async () => {
+    if (!currentUser) {
+      navigate('/login');
+      return;
+    }
+    setLikeBusy(true);
+    setLikeError('');
+    try {
+      const res = await (liked ? unlikeArticle(post.id) : likeArticle(post.id));
+      setLiked(res.liked);
+      setLikeCount(res.like_count);
+    } catch (err) {
+      if (err.status === 401) navigate('/login');      // the session has expired
+      else setLikeError(err.message || 'Could not update like.');
+    } finally {
+      setLikeBusy(false);
     }
   };
 
@@ -196,6 +228,24 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
           <Button variant="contained" size="small" onClick={handleOpen}>
             Read More
           </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {/* Disabled until /api/me has answered, so a logged-in reader is never sent to /login. */}
+            <IconButton
+              size="small"
+              color={liked ? 'error' : 'default'}
+              onClick={handleToggleLike}
+              disabled={!authReady || likeBusy}
+              aria-pressed={liked}
+              aria-label={liked ? 'Unlike post' : 'Like post'}
+              title={currentUser ? (liked ? 'Unlike' : 'Like') : 'Log in to like posts'}
+              data-testid="like-button"
+            >
+              {liked ? <FavoriteIcon fontSize="small" /> : <FavoriteBorderIcon fontSize="small" />}
+            </IconButton>
+            <Typography variant="body2" color="text.secondary" data-testid="like-count">
+              {likeCount}
+            </Typography>
+          </Box>
           {manage && managing && (
             <Button
               variant="outlined"
@@ -208,6 +258,11 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
             </Button>
           )}
         </CardActions>
+        {likeError && (
+          <Typography variant="caption" color="error" align="center" sx={{ px: 2, pb: 1 }}>
+            {likeError}
+          </Typography>
+        )}
       </Card>
 
       {/* Owner-only delete confirmation */}

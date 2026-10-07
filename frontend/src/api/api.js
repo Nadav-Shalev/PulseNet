@@ -59,6 +59,26 @@ export const removePostTag = async (postId, tagName) => {
   return data;
 };
 
+// Like / unlike a post. The liker is derived from the session cookie on the
+// backend. Both return { liked, like_count } with the post's fresh total.
+const setLike = async (postId, liked) => {
+  const res = await fetch(`${BASE}/articles/${postId}/like`, {
+    method: liked ? 'POST' : 'DELETE',
+    ...CREDS,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+export const likeArticle = (postId) => setLike(postId, true);
+
+export const unlikeArticle = (postId) => setLike(postId, false);
+
 // Paged user list for the Users page. `q` filters by username or name on the
 // backend; limit/offset drive the "first 10 + Load More" flow.
 export const fetchUsers = (q = '', limit = 10, offset = 0) =>

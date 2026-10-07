@@ -49,3 +49,9 @@ Cypress.Commands.add('apiCreatePost', ({ title, bodyHtml, tags = [], mainImage =
 Cypress.Commands.add('apiFollow', (userId) =>
   cy.request('POST', api(`/users/${userId}/follow`)).its('body'),
 )
+
+// Like a post as the logged-in user. Yields { liked, like_count }.
+//   cy.apiLike(post.id)
+Cypress.Commands.add('apiLike', (postId) =>
+  cy.request('POST', api(`/articles/${postId}/like`)).its('body'),
+)
