@@ -1,7 +1,9 @@
-"""Article create/delete API tests (Flask test client + mocked DB seam).
+"""Article write API tests: create, delete, and remove a tag (Flask test client +
+mocked DB seam).
 
 Focus: the auth gate, that stored body_html is always sanitized (both the HTML and
-the markdown-fallback branches), input validation, and owner-only deletion.
+the markdown-fallback branches), input validation, and that only the post's owner
+can delete it or remove its tags.
 """
 
 import sys
@@ -15,7 +17,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from support import FakeConn, client, patch_db  # noqa: E402
+from support import FakeConn, client, db_down, patch_db  # noqa: E402
 
 
 def _session_user(**over):
@@ -112,6 +114,44 @@ class CreateArticleValidationTests(unittest.TestCase):
         resp = self._post({"title": "T", "body_html": "<p>hi</p>", "tags": ["t"] * 11})
         self.assertEqual(resp.status_code, 400)
 
+    def test_html_without_text_returns_400(self):
+        resp = self._post({"title": "T", "body_html": "<p>&nbsp;</p><p> </p>"})
+        self.assertEqual(resp.status_code, 400)
+
+
+class CreateArticleStorageTests(unittest.TestCase):
+    def test_author_comes_from_the_session_not_the_body(self):
+        conn = FakeConn(fetchone=[_session_user(id=42)], lastrowid=7)
+        with patch_db(conn):
+            resp = _authed_client().post("/api/articles", json={"article": {
+                "title": "T", "body_html": "<p>hi</p>", "author_id": 99,
+            }, "author_id": 99})
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(conn.params_for("insert into posts")[0], 42)
+        self.assertEqual(resp.get_json()["user"]["username"], "ada")
+
+    def test_tags_are_stored_exact_case_and_linked(self):
+        # Per tag: INSERT IGNORE, then SELECT id → (tag id,), then the link row.
+        conn = FakeConn(fetchone=[_session_user(), (3,), (4,)], lastrowid=7)
+        with patch_db(conn):
+            resp = _authed_client().post("/api/articles", json={"article": {
+                "title": "T", "body_html": "<p>hi</p>", "tags": [" React ", "", "flask"],
+            }})
+
+        self.assertEqual(resp.status_code, 201)
+        # Trimmed, blank skipped, casing kept (tags.name is case-sensitive).
+        self.assertEqual(resp.get_json()["tag_list"], ["React", "flask"])
+        self.assertEqual(
+            [params for _, params in conn.find("insert ignore into tags")],
+            [("React",), ("flask",)],
+        )
+        self.assertEqual(
+            [params for _, params in conn.find("insert ignore into posts_tags")],
+            [(7, 3), (7, 4)],
+        )
+        self.assertGreaterEqual(conn.commits, 2)   # session cleanup + the post
+
 
 class DeleteArticleTests(unittest.TestCase):
     def test_delete_requires_session(self):
@@ -143,6 +183,92 @@ class DeleteArticleTests(unittest.TestCase):
             resp = _authed_client().delete("/api/articles/5")
 
         self.assertEqual(resp.status_code, 404)
+
+    def test_tag_links_are_removed_before_the_post(self):
+        conn = FakeConn(fetchone=[_session_user(id=42), (42,)])
+        with patch_db(conn):
+            _authed_client().delete("/api/articles/5")
+
+        statements = [" ".join(sql.split()).lower() for sql, _ in conn.executed]
+        links = statements.index("delete from posts_tags where post_id = %s")
+        post = statements.index("delete from posts where id = %s")
+        # posts_tags references posts, so the links must go first.
+        self.assertLess(links, post)
+        self.assertEqual(conn.params_for("delete from posts_tags"), (5,))
+        self.assertGreaterEqual(conn.commits, 2)   # session cleanup + the delete
+
+    def test_delete_with_db_down_returns_503(self):
+        with db_down():
+            resp = _authed_client().delete("/api/articles/5")
+
+        self.assertEqual(resp.status_code, 503)
+
+
+class RemoveArticleTagTests(unittest.TestCase):
+    def _delete(self, query, fetchone, fetchall=None):
+        conn = FakeConn(fetchone=fetchone, fetchall=fetchall)
+        with patch_db(conn):
+            resp = _authed_client().delete(f"/api/articles/5/tags{query}")
+        return resp, conn
+
+    def test_remove_tag_requires_session(self):
+        resp = client().delete("/api/articles/5/tags?name=react")
+
+        self.assertEqual(resp.status_code, 401)
+
+    def test_missing_name_returns_400(self):
+        for query in ("", "?name=", "?name=%20%20"):
+            with self.subTest(query=query):
+                resp, conn = self._delete(query, fetchone=[_session_user()])
+
+                self.assertEqual(resp.status_code, 400)
+                self.assertFalse(conn.ran("from posts where id"))
+
+    def test_owner_removes_the_tag_link(self):
+        # session user → post owner (42) → tag id 7; then the remaining tags.
+        resp, conn = self._delete(
+            "?name=react",
+            fetchone=[_session_user(id=42), (42,), (7,)],
+            fetchall=[[("flask",), ("python",)]],
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(), {"tag_list": ["flask", "python"]})
+        self.assertEqual(
+            conn.params_for("delete from posts_tags where post_id = %s and tag_id"), (5, 7)
+        )
+        # Only the link goes; the tag row stays for other posts.
+        self.assertFalse(conn.ran("delete from tags"))
+
+    def test_tag_name_is_trimmed_and_matched_exact_case(self):
+        _, conn = self._delete(
+            "?name=%20React%20", fetchone=[_session_user(id=42), (42,), None],
+        )
+
+        self.assertEqual(conn.params_for("select id from tags where name"), ("React",))
+
+    def test_unknown_tag_deletes_nothing_and_returns_current_tags(self):
+        resp, conn = self._delete(
+            "?name=nope",
+            fetchone=[_session_user(id=42), (42,), None],
+            fetchall=[[("flask",)]],
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json(), {"tag_list": ["flask"]})
+        self.assertFalse(conn.ran("delete from posts_tags"))
+
+    def test_non_owner_is_forbidden(self):
+        resp, conn = self._delete("?name=react", fetchone=[_session_user(id=42), (99,)])
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(conn.ran("delete from posts_tags"))
+
+    def test_missing_post_returns_404(self):
+        resp, conn = self._delete("?name=react", fetchone=[_session_user(id=42), None])
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(conn.ran("delete from posts_tags"))
 
 
 if __name__ == "__main__":

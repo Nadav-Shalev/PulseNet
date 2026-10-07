@@ -11,6 +11,8 @@ It provides:
     (for assertions) and result rows are served from queues you seed per test.
   * ``patch_db(...)`` — patches ``app.get_db_connection`` / ``app.is_db_available``
     for the duration of a test.
+  * ``db_down()`` — makes every connection attempt fail, as when MySQL is
+    unreachable, to exercise the mock fallback (reads) and 503 (writes).
 
 Why a hand-rolled fake instead of MagicMock: the endpoints issue a small, ordered
 sequence of ``execute``/``fetchone``/``fetchall`` calls, and several open more
@@ -23,6 +25,8 @@ from collections import deque
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
+
+import mysql.connector
 
 # ── Make ``import app`` work regardless of CWD / how the tests are launched ──────
 _TESTS_DIR  = Path(__file__).resolve().parent
@@ -152,3 +156,18 @@ def patch_db(conn, *, db_available=True):
     with patch.object(app, "get_db_connection", return_value=conn), \
          patch.object(app, "is_db_available", return_value=db_available):
         yield conn
+
+
+@contextmanager
+def db_down():
+    """Patch the DB seam so every connection attempt fails like an unreachable MySQL.
+
+    Usage::
+
+        with db_down():
+            resp = client().get("/api/articles")   # served from mock_data
+    """
+    error = mysql.connector.errors.InterfaceError("2003: Can't connect to MySQL server")
+    with patch.object(app, "get_db_connection", side_effect=error), \
+         patch.object(app, "is_db_available", return_value=False):
+        yield
