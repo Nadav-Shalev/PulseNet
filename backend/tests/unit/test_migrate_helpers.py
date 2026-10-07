@@ -27,6 +27,41 @@ SCHEMA_SQL = BACKEND_DIR.parent / "database" / "schema.sql"
 # local DB were stamped with; editing it would silently desync fresh DBs from them.
 BASELINE_SHA256 = "d3c1cc2bad98c8b69dce5af9e1936a260fdf7be4806c4302cfbaf05ba10988ef"
 
+_CREATE_TABLE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?`?(\w+)`?\s*\((.*)\)", re.IGNORECASE | re.DOTALL)
+_ALTER_TABLE = re.compile(r"ALTER TABLE `?(\w+)`?(.*)", re.IGNORECASE | re.DOTALL)
+# A column definition line: a name, then its type. Keys, indexes and checks are not columns.
+_COLUMN_LINE = re.compile(r"^\s*`?([A-Za-z_]\w*)`?\s+[A-Za-z]")
+_ADD_OR_DROP = re.compile(r"\b(ADD|DROP)\s+(?:COLUMN\s+)?`?(\w+)`?", re.IGNORECASE)
+_NOT_COLUMNS = {"PRIMARY", "FOREIGN", "UNIQUE", "INDEX", "KEY", "CHECK", "CONSTRAINT", "FULLTEXT", "SPATIAL"}
+
+
+def _columns_by_table(sql_text, tables=None):
+    """Fold the column changes in ``sql_text`` into ``{table: {column, ...}}``:
+    CREATE TABLE sets a table's columns, ALTER TABLE ADD / DROP [COLUMN] change them.
+    (RENAME / CHANGE COLUMN are not handled: the test fails until they are.)"""
+    tables = {} if tables is None else tables
+    for statement in migrate.split_sql(sql_text):
+        create = _CREATE_TABLE.match(statement)
+        if create:
+            name, body = create.groups()
+            tables[name] = {
+                match.group(1).lower()
+                for match in map(_COLUMN_LINE.match, body.splitlines())
+                if match and match.group(1).upper() not in _NOT_COLUMNS
+            }
+            continue
+        alter = _ALTER_TABLE.match(statement)
+        if alter:
+            name, changes = alter.groups()
+            for action, column in _ADD_OR_DROP.findall(changes):
+                if column.upper() in _NOT_COLUMNS:
+                    continue  # ADD INDEX, DROP FOREIGN KEY, ...
+                if action.upper() == "ADD":
+                    tables.setdefault(name, set()).add(column.lower())
+                else:
+                    tables.get(name, set()).discard(column.lower())
+    return tables
+
 
 class SplitSqlTests(unittest.TestCase):
     def test_splits_on_semicolons_and_strips_whitespace(self):
@@ -165,6 +200,24 @@ class RealMigrationsFolderTests(unittest.TestCase):
         for m in migrate.discover_migrations(migrate.MIGRATIONS_DIR):
             migration_tables |= set(create_re.findall(m.path.read_text(encoding="utf-8")))
         self.assertEqual(schema_tables, migration_tables)
+
+    def test_every_schema_column_is_created_by_a_migration(self):
+        # The table check above cannot see a column that a migration adds with
+        # ALTER TABLE but schema.sql forgets (or the reverse): compare columns too.
+        schema_columns = _columns_by_table(SCHEMA_SQL.read_text(encoding="utf-8"))
+        migrated_columns = {}
+        for m in migrate.discover_migrations(migrate.MIGRATIONS_DIR):
+            _columns_by_table(m.path.read_text(encoding="utf-8"), migrated_columns)
+        self.assertEqual(schema_columns, migrated_columns)
+
+    def test_column_folding_follows_create_add_and_drop(self):
+        tables = _columns_by_table(
+            "CREATE TABLE t (\n  id INT PRIMARY KEY,\n  old_col TEXT,\n  INDEX i (old_col),\n"
+            "  CHECK (id > 0)\n);\n"
+            "ALTER TABLE t ADD COLUMN kind ENUM('a', 'b') NOT NULL, ADD flag BOOLEAN, ADD INDEX j (kind);\n"
+            "ALTER TABLE t DROP COLUMN old_col, DROP FOREIGN KEY fk_x;\n"
+        )
+        self.assertEqual(tables, {"t": {"id", "kind", "flag"}})
 
 
 if __name__ == "__main__":

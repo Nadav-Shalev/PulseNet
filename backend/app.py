@@ -353,7 +353,8 @@ def _clear_session_cookie(resp):
 
 def require_session(view):
     """Gate write endpoints. Looks up the cookie's session_id and stashes the
-    matching user on ``g.current_user``; 401 if missing/expired/invalid."""
+    matching user (with their role) on ``g.current_user``; 401 if
+    missing/expired/invalid."""
     @wraps(view)
     def wrapped(*args, **kwargs):
         sid = request.cookies.get(SESSION_COOKIE_NAME)
@@ -367,7 +368,7 @@ def require_session(view):
             cursor.execute(
                 """
                 SELECT u.id, u.name, u.username, u.email, u.bio,
-                       u.avatar, u.profile_image
+                       u.avatar, u.profile_image, u.role
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.session_id = %s AND s.expires_at > NOW()
@@ -385,6 +386,19 @@ def require_session(view):
         g.current_user = user
         return view(*args, **kwargs)
     return wrapped
+
+
+def require_admin(view):
+    """Gate admin-only endpoints. Runs require_session itself (401 without a valid
+    session, 503 when the DB is down), so it cannot be forgotten, then answers 403
+    unless the session user's role is 'admin'. Fails closed: no role is no admin.
+    The role is granted only by hand, with backend/manage.py make-admin."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if g.current_user.get("role") != "admin":
+            return jsonify({"error": "Admin access required"}), 403
+        return view(*args, **kwargs)
+    return require_session(wrapped)
 
 
 def _current_user_from_cookie():

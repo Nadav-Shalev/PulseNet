@@ -8,6 +8,8 @@ social graph endpoints, and local image uploads for the React frontend.
 ```text
 backend/
 ├── app.py
+├── migrate.py        schema migrations (see ../database/README.md)
+├── manage.py         admin commands, e.g. make-admin
 ├── mock_data.py
 ├── seed_data.py
 ├── requirements.txt
@@ -74,6 +76,22 @@ The API runs at `http://localhost:5000`.
 
 Request helpers and frontend API shapes are documented in
 `../frontend/src/api/README.md`.
+
+## Admin Users
+
+Every account starts with the role `user`. Admin-only endpoints are gated by
+`require_admin` in `app.py`. The role is granted only by hand, never through the API
+(signup and `PATCH /api/me` ignore it), from the project root:
+
+```bash
+python backend/manage.py make-admin <username> --dry-run   # show the target and what would change
+python backend/manage.py make-admin <username>
+```
+
+Like `migrate.py`, it reads the database settings from `backend/.env`, and real
+environment variables win. Before doing anything it prints the MySQL version, host
+and database it is about to change, but never the credentials. On the server that is
+the production database (RDS), so run it with `--dry-run` first.
 
 ## Tests
 
