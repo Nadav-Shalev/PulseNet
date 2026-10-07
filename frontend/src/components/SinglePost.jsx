@@ -89,6 +89,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   return (
     <>
       <Card
+        data-testid="post-card"
         sx={{
           minWidth: 275,
           height: '100%',
@@ -130,6 +131,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
             </Box>
           }
           subheader={metaLine}
+          slotProps={{ subheader: { 'data-testid': 'post-meta' } }}
           action={
             manage ? (
               managing ? (

@@ -2,7 +2,7 @@
 
 import sys
 import unittest
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -73,9 +73,19 @@ class IsoTests(unittest.TestCase):
     def test_none_returns_none(self):
         self.assertIsNone(app._iso(None))
 
-    def test_datetime_returns_isoformat(self):
+    def test_naive_datetime_is_labelled_utc(self):
+        # Connections run in UTC, so a naive DB value is UTC. Without the offset a
+        # browser would read it as its own local time (3 hours off in Israel).
         dt = datetime(2025, 5, 1, 10, 30, 0)
-        self.assertEqual(app._iso(dt), "2025-05-01T10:30:00")
+        self.assertEqual(app._iso(dt), "2025-05-01T10:30:00+00:00")
+
+    def test_aware_datetime_is_converted_to_utc(self):
+        israel_summer = timezone(timedelta(hours=3))
+        dt = datetime(2025, 5, 1, 13, 30, 0, tzinfo=israel_summer)
+        self.assertEqual(app._iso(dt), "2025-05-01T10:30:00+00:00")
+
+    def test_date_without_time_is_left_as_a_date(self):
+        self.assertEqual(app._iso(date(2025, 5, 1)), "2025-05-01")
 
     def test_non_datetime_falls_back_to_str(self):
         self.assertEqual(app._iso("2025-05-01"), "2025-05-01")
@@ -101,7 +111,7 @@ class ShapePostRowTests(unittest.TestCase):
         self.assertEqual(post["title"], "T")
         self.assertEqual(post["url"], "http://d/x")
         self.assertEqual(post["tag_list"], [])
-        self.assertEqual(post["created_at"], "2025-05-01T09:00:00")
+        self.assertEqual(post["created_at"], "2025-05-01T09:00:00+00:00")
         self.assertEqual(post["user"]["username"], "ada")
 
     def test_profile_image_falls_back_to_dicebear(self):

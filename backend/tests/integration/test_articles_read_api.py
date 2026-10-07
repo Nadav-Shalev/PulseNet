@@ -71,7 +71,7 @@ class ArticleListTests(unittest.TestCase):
         self.assertEqual([p["id"] for p in posts], [2, 1])
         self.assertEqual(posts[0]["tag_list"], ["react", "flask"])
         self.assertEqual(posts[1]["tag_list"], [])
-        self.assertEqual(posts[0]["created_at"], "2026-10-07T12:30:00")
+        self.assertEqual(posts[0]["created_at"], "2026-10-07T12:30:00+00:00")
         self.assertEqual(posts[0]["user"]["username"], "ada")
         # Default page 1 of 10, newest first.
         self.assertEqual(conn.params_for("from posts order by created_at desc"), (10, 0))

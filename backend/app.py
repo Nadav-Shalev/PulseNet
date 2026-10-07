@@ -17,6 +17,7 @@ except ImportError:
             for p in paragraphs if p.strip()
         )
 import secrets
+from datetime import datetime, timezone
 from functools import wraps
 
 import bcrypt
@@ -172,12 +173,20 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ─── DB helpers ───────────────────────────────────────────────────────────────
 
+# Every connection runs in UTC, whatever the server's own time zone (SYSTEM on a
+# dev machine, UTC on RDS). TIMESTAMP columns are stored as UTC and converted to
+# the session zone on read, so they come back as UTC and NOW() agrees with them;
+# _iso() then labels them +00:00 for the browser.
+DB_TIME_ZONE = "+00:00"
+
+
 def get_db_connection():
     return mysql.connector.connect(
         host=os.getenv("DB_HOST"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
         database=os.getenv("DB_NAME"),
+        time_zone=DB_TIME_ZONE,
     )
 
 
@@ -371,14 +380,18 @@ def _current_user_from_cookie():
 # ─── Row → DEV.to-shaped dict ─────────────────────────────────────────────────
 
 def _iso(dt):
-    """Render a DB datetime as an ISO-8601 string the client can parse for
-    relative time. Returns None when the value is missing/unparseable."""
+    """Render a DB datetime as an ISO-8601 string with an explicit UTC offset, so
+    every browser parses the same instant for relative time whatever its own zone.
+
+    Connections run in UTC (DB_TIME_ZONE), so a naive datetime from MySQL is UTC.
+    Returns None when the value is missing; anything else falls back to str()."""
     if dt is None:
         return None
-    try:
-        return dt.isoformat()
-    except AttributeError:
-        return str(dt)
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    return str(dt)
 
 
 def _shape_post_row(row):
