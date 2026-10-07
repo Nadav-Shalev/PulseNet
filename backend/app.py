@@ -207,7 +207,9 @@ SESSION_MAX_AGE_SECONDS = SESSION_DURATION_DAYS * 24 * 60 * 60  # 604800
 
 
 def _user_shape(row):
-    """Public user JSON. Must NEVER include password_hash."""
+    """The logged-in user's own record (/api/me, login, signup). It is the only
+    JSON that carries an email, so never use it for another user's data. Must
+    NEVER include password_hash."""
     return {
         "id":            row["id"],
         "name":          row.get("name"),
@@ -410,7 +412,6 @@ def _shape_post_row(row):
         "user": {
             "username": row.get("username", ""),
             "name": row.get("name", ""),
-            "email": row.get("email", ""),
             "profile_image": row.get("profile_image") or row.get("avatar") or
                              f"{DICEBEAR_URL}?seed={row.get('username', '')}",
         },
@@ -455,7 +456,7 @@ def get_articles():
                 """
                 SELECT p.id, p.title, p.description, p.cover_image, p.devto_url,
                        p.readable_publish_date, p.created_at,
-                       u.username, u.name, u.email, u.avatar, u.profile_image,
+                       u.username, u.name, u.avatar, u.profile_image,
                        t.name AS tag_name
                 FROM (
                     SELECT posts.id, posts.title, posts.description, posts.cover_image,
@@ -480,7 +481,7 @@ def get_articles():
                 """
                 SELECT p.id, p.title, p.description, p.cover_image, p.devto_url,
                        p.readable_publish_date, p.created_at,
-                       u.username, u.name, u.email, u.avatar, u.profile_image,
+                       u.username, u.name, u.avatar, u.profile_image,
                        t.name AS tag_name
                 FROM (
                     SELECT posts.id, posts.title, posts.description, posts.cover_image,
@@ -505,7 +506,7 @@ def get_articles():
                 """
                 SELECT p.id, p.title, p.description, p.cover_image, p.devto_url,
                        p.readable_publish_date, p.created_at,
-                       u.username, u.name, u.email, u.avatar, u.profile_image,
+                       u.username, u.name, u.avatar, u.profile_image,
                        t.name AS tag_name
                 FROM (
                     SELECT posts.id, posts.title, posts.description, posts.cover_image,
@@ -529,7 +530,7 @@ def get_articles():
                 """
                 SELECT p.id, p.title, p.description, p.cover_image, p.devto_url,
                        p.readable_publish_date, p.created_at,
-                       u.username, u.name, u.email, u.avatar, u.profile_image,
+                       u.username, u.name, u.avatar, u.profile_image,
                        t.name AS tag_name
                 FROM (
                     SELECT id, title, description, cover_image, devto_url,
@@ -567,7 +568,7 @@ def get_article(article_id):
             SELECT p.id, p.title, p.description, p.cover_image, p.devto_url,
                    p.readable_publish_date, p.created_at, p.body_html, p.body,
                    p.devto_id,
-                   u.username, u.name, u.email, u.avatar, u.profile_image,
+                   u.username, u.name, u.avatar, u.profile_image,
                    t.name AS tag_name
             FROM posts p
             JOIN users u ON p.author_id = u.id
@@ -718,7 +719,6 @@ def create_article():
         "user": {
             "username": user["username"],
             "name": user["name"],
-            "email": user["email"],
             "profile_image": user.get("profile_image") or user.get("avatar") or
                              f"{DICEBEAR_URL}?seed={user['username']}",
         },
@@ -1069,11 +1069,13 @@ def search_users():
         conn   = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         like   = f"%{q}%"
+        # Emails are private: not returned, and not matched either, or searching
+        # for an address would reveal whose it is.
         cursor.execute(
-            "SELECT id, name, username, email, avatar FROM users "
-            "WHERE name LIKE %s OR username LIKE %s OR email LIKE %s "
+            "SELECT id, name, username, avatar FROM users "
+            "WHERE name LIKE %s OR username LIKE %s "
             "LIMIT %s OFFSET %s",
-            (like, like, like, limit, offset),
+            (like, like, limit, offset),
         )
         results = cursor.fetchall()
         cursor.close()
@@ -1083,38 +1085,12 @@ def search_users():
         return jsonify(mock_search_users(q, limit, offset))
 
 
-# ─── GET /api/users/by-email ──────────────────────────────────────────────────
-
-@app.route("/api/users/by-email")
-def get_user_by_email():
-    email = (request.args.get("email") or "").strip()
-    if not email:
-        return jsonify({"error": "Missing query parameter 'email'"}), 400
-
-    try:
-        conn   = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT id, name, username, email, bio, avatar, profile_image "
-            "FROM users WHERE email = %s",
-            (email,),
-        )
-        user = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if user is None:
-            return jsonify({"error": "User not found"}), 404
-        return jsonify(user)
-    except Exception as exc:
-        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
-
-
 # ─── GET /api/users (list with post counts) ───────────────────────────────────
 
 @app.route("/api/users")
 def list_users():
-    # Paged user list for the Users page. Optional `q` filters by email (LIKE).
-    # `limit`/`offset` drive the "first 10 + Load More" flow.
+    # Paged user list for the Users page. Optional `q` filters by username or name
+    # (LIKE). `limit`/`offset` drive the "first 10 + Load More" flow.
     q      = (request.args.get("q") or "").strip()
     limit  = request.args.get("limit",  10, type=int)
     offset = request.args.get("offset",  0, type=int)
@@ -1123,12 +1099,13 @@ def list_users():
         conn   = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         # `where` is a fixed string (never user input); the values are parameterized.
-        # Search by username (the requirement), with name/email as a forgiving superset.
-        where  = "WHERE (u.username LIKE %s OR u.name LIKE %s OR u.email LIKE %s)" if q else ""
-        params = ([f"%{q}%"] * 3 if q else []) + [limit, offset]
+        # Search by username (the requirement), with name as a forgiving superset.
+        # Never by email: it is private, and matching on it would leak it.
+        where  = "WHERE (u.username LIKE %s OR u.name LIKE %s)" if q else ""
+        params = ([f"%{q}%"] * 2 if q else []) + [limit, offset]
         cursor.execute(
             f"""
-            SELECT u.id, u.name, u.username, u.email, u.bio,
+            SELECT u.id, u.name, u.username, u.bio,
                    u.avatar, u.profile_image,
                    COUNT(p.id) AS post_count
             FROM users u
@@ -1157,7 +1134,7 @@ def get_user_by_username(username):
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             """
-            SELECT u.id, u.name, u.username, u.email, u.bio,
+            SELECT u.id, u.name, u.username, u.bio,
                    u.avatar, u.profile_image,
                    (SELECT COUNT(*) FROM posts   WHERE author_id   = u.id) AS post_count,
                    (SELECT COUNT(*) FROM follows WHERE following_id = u.id) AS followers_count,
@@ -1254,7 +1231,7 @@ def _follow_list(username, column):
             return jsonify({"error": "User not found"}), 404
         cursor.execute(
             f"""
-            SELECT u.id, u.name, u.username, u.email, u.avatar, u.profile_image
+            SELECT u.id, u.name, u.username, u.avatar, u.profile_image
             FROM follows f
             JOIN users u ON u.id = f.{column}
             WHERE f.{other} = %s

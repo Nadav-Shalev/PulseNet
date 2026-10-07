@@ -33,7 +33,7 @@ def _session_user(**over):
 def _profile_row(**over):
     """Row shape returned by the GET /api/users/<username> SELECT."""
     row = {
-        "id": 7, "name": "Bob", "username": "bob", "email": "bob@example.com",
+        "id": 7, "name": "Bob", "username": "bob",
         "bio": "backend", "avatar": None, "profile_image": "b.svg",
         "post_count": 3, "followers_count": 2, "following_count": 1,
     }
@@ -138,9 +138,8 @@ class SearchUsersTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(conn.executed, [])
 
-    def test_matches_name_username_and_email_with_paging(self):
-        rows = [{"id": 42, "name": "Ada", "username": "ada",
-                 "email": "ada@example.com", "avatar": None}]
+    def test_matches_name_or_username_with_paging(self):
+        rows = [{"id": 42, "name": "Ada", "username": "ada", "avatar": None}]
         conn = FakeConn(fetchall=[rows])
         with patch_db(conn):
             resp = client().get("/api/users/search?q=ad&limit=5&offset=10")
@@ -148,8 +147,8 @@ class SearchUsersTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json(), rows)
         self.assertEqual(
-            conn.params_for("where name like %s or username like %s or email like %s"),
-            ("%ad%", "%ad%", "%ad%", 5, 10),
+            conn.params_for("where name like %s or username like %s"),
+            ("%ad%", "%ad%", 5, 10),
         )
 
     def test_default_page_is_first_ten(self):
@@ -167,36 +166,11 @@ class SearchUsersTests(unittest.TestCase):
         self.assertEqual([u["username"] for u in resp.get_json()], ["bobcoder"])
 
     def test_db_down_mock_search_is_paged(self):
-        # "dev.to" is in every mock user's email.
+        # "c" is in every mock username (alicedev, bobcoder, carolscript).
         with db_down():
-            resp = client().get("/api/users/search?q=dev.to&limit=1&offset=1")
+            resp = client().get("/api/users/search?q=c&limit=1&offset=1")
 
         self.assertEqual([u["username"] for u in resp.get_json()], ["bobcoder"])
-
-
-class UserByEmailTests(unittest.TestCase):
-    """No UI screen calls this endpoint, so only its contract is checked."""
-
-    def test_missing_email_returns_400(self):
-        resp = client().get("/api/users/by-email?email=%20")
-
-        self.assertEqual(resp.status_code, 400)
-
-    def test_found_and_not_found(self):
-        user = {"id": 42, "username": "ada", "email": "ada@example.com"}
-        conn = FakeConn(fetchone=[user, None])
-        with patch_db(conn):
-            found = client().get("/api/users/by-email?email=ada@example.com")
-            missing = client().get("/api/users/by-email?email=nobody@example.com")
-
-        self.assertEqual(found.get_json(), user)
-        self.assertEqual(missing.status_code, 404)
-
-    def test_db_down_returns_503(self):
-        with db_down():
-            resp = client().get("/api/users/by-email?email=ada@example.com")
-
-        self.assertEqual(resp.status_code, 503)
 
 
 class ListUsersTests(unittest.TestCase):
@@ -213,14 +187,14 @@ class ListUsersTests(unittest.TestCase):
         self.assertNotIn("where", " ".join(sql.split()).lower())
         self.assertEqual(params, [10, 0])
 
-    def test_query_filters_on_username_name_and_email(self):
+    def test_query_filters_on_username_and_name(self):
         conn = FakeConn()
         with patch_db(conn):
             client().get("/api/users?q=%20bo%20&limit=20&offset=40")
 
         self.assertEqual(
-            conn.params_for("where (u.username like %s or u.name like %s or u.email like %s)"),
-            ["%bo%", "%bo%", "%bo%", 20, 40],        # q is trimmed before the LIKE
+            conn.params_for("where (u.username like %s or u.name like %s)"),
+            ["%bo%", "%bo%", 20, 40],                # q is trimmed before the LIKE
         )
 
     def test_db_down_returns_503(self):

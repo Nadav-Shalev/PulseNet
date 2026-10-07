@@ -59,24 +59,8 @@ export const removePostTag = async (postId, tagName) => {
   return data;
 };
 
-export const fetchUserByEmail = async (email) => {
-  const res = await fetch(`${BASE}/users/by-email?email=${encodeURIComponent(email)}`, CREDS);
-  if (res.status === 404) {
-    const err = new Error('User not found');
-    err.status = 404;
-    throw err;
-  }
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    const err = new Error(data.error || `Request failed (${res.status})`);
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
-};
-
-// Paged user list for the Users page. `q` filters by email on the backend;
-// limit/offset drive the "first 10 + Load More" flow.
+// Paged user list for the Users page. `q` filters by username or name on the
+// backend; limit/offset drive the "first 10 + Load More" flow.
 export const fetchUsers = (q = '', limit = 10, offset = 0) =>
   fetch(`${BASE}/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`, CREDS)
     .then(r => r.json());

@@ -51,7 +51,7 @@ export default function SearchBar() {
   const sentinelRef = useRef(null);
 
   // Debounced: when the search query changes, reset and fetch the first 10 from
-  // the server (matches username/name/email). Brief item 7 — "fetch first 10
+  // the server (matches username/name). Brief item 7 — "fetch first 10
   // users accordingly to the search field".
   useEffect(() => {
     let cancelled = false;
