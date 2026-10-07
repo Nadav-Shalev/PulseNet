@@ -33,7 +33,8 @@ the same command works on a new laptop, the local dev database and RDS.
 1. Add `database/migrations/NNN_<lower_snake_name>.sql` with the next free number,
    e.g. `001_add_likes.sql`. Keep it small: MySQL commits DDL immediately, so a
    migration that fails halfway cannot be rolled back.
-2. Apply the same change to `schema.sql` and to `docs/db-diagram.mmd` / `docs/db-diagram.md`.
+2. Apply the same change to `schema.sql` and to `docs/db-diagram.mmd` / `docs/db-diagram.md`,
+   and re-export `docs/db-diagram.png` (see [docs/db-diagram.md](../docs/db-diagram.md)).
 3. Run `python backend/migrate.py` locally; on the server it runs as part of the
    deploy steps.
 

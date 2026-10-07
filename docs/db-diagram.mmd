@@ -43,12 +43,12 @@ erDiagram
     }
 
     posts_tags {
-        int post_id FK
-        int tag_id  FK
+        int post_id PK, FK
+        int tag_id  PK, FK
     }
 
     follows {
-        int       follower_id  FK
-        int       following_id FK
+        int       follower_id  PK, FK
+        int       following_id PK, FK
         timestamp created_at
     }
