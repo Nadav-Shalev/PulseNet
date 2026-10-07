@@ -30,6 +30,7 @@ class GetDbConnectionTests(unittest.TestCase):
         self.assertIs(conn, connect.return_value)
         connect.assert_called_once_with(
             host="db.local", user="pulse", password="not-a-secret", database="pulsenet_test",
+            time_zone="+00:00",
         )
 
 
