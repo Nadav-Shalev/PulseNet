@@ -445,6 +445,9 @@ def _shape_post_row(row):
         "readable_publish_date": row.get("readable_publish_date") or str(row.get("created_at", ""))[:10],
         "url": row.get("devto_url"),
         "tag_list": [],
+        # Filled in by _attach_likes for posts that have likes.
+        "like_count": 0,
+        "liked_by_me": False,
         "user": {
             "username": row.get("username", ""),
             "name": row.get("name", ""),
@@ -466,6 +469,33 @@ def _aggregate_tags(rows):
     return list(posts.values())
 
 
+def _attach_likes(cursor, posts, viewer_id):
+    """Set like_count / liked_by_me on shaped posts with one query for the page.
+
+    ``cursor`` must be a dictionary cursor. ``viewer_id`` is None for a logged-out
+    visitor: ``user_id = NULL`` is never true, so liked_by_me stays False. The
+    likes are counted here rather than joined into the feed queries, which already
+    return one row per tag."""
+    if not posts:
+        return posts                      # "post_id IN ()" is invalid SQL
+    ids = [post["id"] for post in posts]
+    # Only "%s" placeholders go into the f-string; the ids themselves are bound.
+    placeholders = ", ".join(["%s"] * len(ids))
+    # user_id = %s is 1 on the viewer's own like row (at most one, by the primary key).
+    cursor.execute(
+        "SELECT post_id, COUNT(*) AS like_count, SUM(user_id = %s) AS liked_by_me "
+        f"FROM likes WHERE post_id IN ({placeholders}) GROUP BY post_id",
+        (viewer_id, *ids),
+    )
+    by_post = {row["post_id"]: row for row in cursor.fetchall()}
+    for post in posts:
+        row = by_post.get(post["id"])
+        if row:
+            post["like_count"] = int(row["like_count"])
+            post["liked_by_me"] = bool(row["liked_by_me"])
+    return posts
+
+
 # ─── GET /api/articles ────────────────────────────────────────────────────────
 
 @app.route("/api/articles")
@@ -480,11 +510,14 @@ def get_articles():
     try:
         conn   = get_db_connection()
         cursor = conn.cursor(dictionary=True)
+        # Who is asking (None when logged out): personalizes liked_by_me, and the
+        # following feed needs a viewer. Looked up after connecting, so an
+        # unreachable DB still falls back to the mock feed below.
+        viewer = _current_user_from_cookie()
 
         if feed == "following":
             # Only posts authored by people the logged-in user follows.
-            current = _current_user_from_cookie()
-            if not current:
+            if not viewer:
                 cursor.close()
                 conn.close()
                 return jsonify({"error": "Authentication required"}), 401
@@ -509,7 +542,7 @@ def get_articles():
                 LEFT JOIN tags t     ON posts_tags.tag_id = t.id
                 ORDER BY p.created_at DESC, p.id DESC
                 """,
-                (current["id"], per_page, offset),
+                (viewer["id"], per_page, offset),
             )
         elif tag:
             # Exact-case match — tags.name is stored case-sensitively.
@@ -584,9 +617,10 @@ def get_articles():
             )
 
         rows = cursor.fetchall()
+        posts = _attach_likes(cursor, _aggregate_tags(rows), viewer["id"] if viewer else None)
         cursor.close()
         conn.close()
-        return jsonify(_aggregate_tags(rows))
+        return jsonify(posts)
 
     except Exception:
         return jsonify(mock_get_articles(page, per_page, username))
@@ -625,6 +659,8 @@ def get_article(article_id):
         for row in rows:
             if row.get("tag_name"):
                 post["tag_list"].append(row["tag_name"])
+        viewer = _current_user_from_cookie()
+        _attach_likes(cursor, [post], viewer["id"] if viewer else None)
 
         body_html = rows[0].get("body_html")
         devto_id  = rows[0].get("devto_id")
@@ -757,6 +793,8 @@ def create_article():
         "readable_publish_date": "Just now",
         "url": None,
         "tag_list": tag_list,
+        "like_count": 0,
+        "liked_by_me": False,
         "body_html": body_html,
         "user": {
             "username": user["username"],
@@ -834,6 +872,55 @@ def remove_article_tag(post_id):
     cursor.close()
     conn.close()
     return jsonify({"tag_list": remaining})
+
+
+# ─── Like / unlike a post ─────────────────────────────────────────────────────
+
+def _set_like(post_id, liked):
+    """Shared body of like / unlike: store or remove the session user's like on
+    ``post_id`` and reply with ``{"liked", "like_count"}``, the post's fresh total."""
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    me     = g.current_user
+    conn   = get_db_connection()
+    cursor = conn.cursor()
+    # Checked first: INSERT IGNORE would also swallow the foreign-key error of a
+    # missing post (as a warning) and report a like that was never stored.
+    cursor.execute("SELECT id FROM posts WHERE id = %s", (post_id,))
+    if not cursor.fetchone():
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "Post not found"}), 404
+
+    if liked:
+        # INSERT IGNORE + composite primary key: liking twice is a no-op (idempotent).
+        cursor.execute(
+            "INSERT IGNORE INTO likes (user_id, post_id) VALUES (%s, %s)", (me["id"], post_id)
+        )
+    else:
+        cursor.execute(
+            "DELETE FROM likes WHERE user_id = %s AND post_id = %s", (me["id"], post_id)
+        )
+    conn.commit()
+    cursor.execute("SELECT COUNT(*) FROM likes WHERE post_id = %s", (post_id,))
+    like_count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    return jsonify({"liked": liked, "like_count": like_count})
+
+
+@app.route("/api/articles/<int:post_id>/like", methods=["POST"])
+@require_session
+def like_article(post_id):
+    # The liker is the session user, never a user id from the request body.
+    return _set_like(post_id, True)
+
+
+@app.route("/api/articles/<int:post_id>/like", methods=["DELETE"])
+@require_session
+def unlike_article(post_id):
+    return _set_like(post_id, False)
 
 
 # ─── Image upload (local storage, no external services) ────────────────────────

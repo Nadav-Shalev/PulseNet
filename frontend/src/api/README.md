@@ -43,6 +43,8 @@ GET /api/articles?page=1&per_page=10
     "readable_publish_date": "May 7",
     "url": "https://dev.to/...",
     "tag_list": ["react", "javascript"],
+    "like_count": 3,
+    "liked_by_me": false,
     "user": {
       "username": "alicedev",
       "name": "Alice Dev",
@@ -51,6 +53,10 @@ GET /api/articles?page=1&per_page=10
   }
 ]
 ```
+
+`like_count` is the post's total likes. `liked_by_me` is `true` only when the
+session cookie belongs to a user who liked the post (always `false` when logged out).
+Every feed (`username`, `tag`, `feed=following`) and a single article carry both.
 
 ---
 
@@ -109,7 +115,7 @@ Cookie: session_id=...
 
 Returns `401` if the session cookie is missing or expired.
 
-**Response** `201`
+**Response** `201` (a new post also has `"like_count": 0, "liked_by_me": false`)
 ```json
 {
   "id": 99,
@@ -119,6 +125,28 @@ Returns `401` if the session cookie is missing or expired.
   "user": { "username": "...", "name": "...", "profile_image": "..." }
 }
 ```
+
+---
+
+### `likeArticle(id)` / `unlikeArticle(id)`
+
+Like or unlike a post as the logged-in user. The liker comes from the session
+cookie, never from the request. Liking twice is a no-op (one like per user per post).
+
+**Request**
+```
+POST   /api/articles/42/like
+DELETE /api/articles/42/like
+Cookie: session_id=...
+```
+
+**Response** `200`, with the post's fresh total:
+```json
+{ "liked": true, "like_count": 4 }
+```
+
+Returns `401` without a valid session, `404` if the post does not exist, and `503`
+when the database is unavailable.
 
 ---
 

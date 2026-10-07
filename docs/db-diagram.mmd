@@ -1,25 +1,27 @@
 erDiagram
-    users      ||--o{ posts     : "authors (1-to-many)"
-    users      ||--o{ sessions  : "has (1-to-many)"
-    posts      ||--o{ posts_tags : "tagged by"
-    tags       ||--o{ posts_tags : "applied to"
-    users      ||--o{ follows   : "is follower"
-    users      ||--o{ follows   : "is followed"
+    users ||--o{ sessions   : "has"
+    users ||--o{ posts      : "authors"
+    posts ||--o{ posts_tags : "tagged by"
+    tags  ||--o{ posts_tags : "applied to"
+    users ||--o{ follows    : "is follower"
+    users ||--o{ follows    : "is followed"
+    users ||--o{ likes      : "likes"
+    posts ||--o{ likes      : "liked by"
 
     users {
-        int          id            PK
-        varchar      name
-        varchar      username      UK
-        varchar      email         UK
-        text         bio
-        varchar      avatar
-        varchar      profile_image
-        varchar      password_hash
+        int     id            PK
+        varchar name
+        varchar username      UK
+        varchar email         UK
+        text    bio
+        varchar avatar
+        varchar profile_image
+        varchar password_hash
     }
 
     sessions {
-        varchar   session_id  PK
-        int       user_id     FK
+        varchar   session_id PK
+        int       user_id    FK
         timestamp expires_at
     }
 
@@ -38,8 +40,8 @@ erDiagram
     }
 
     tags {
-        int     id    PK
-        varchar name  UK
+        int     id   PK
+        varchar name UK
     }
 
     posts_tags {
@@ -50,5 +52,11 @@ erDiagram
     follows {
         int       follower_id  PK, FK
         int       following_id PK, FK
+        timestamp created_at
+    }
+
+    likes {
+        int       user_id    PK, FK
+        int       post_id    PK, FK
         timestamp created_at
     }

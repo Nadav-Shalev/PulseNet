@@ -119,6 +119,13 @@ class ShapePostRowTests(unittest.TestCase):
 
         self.assertIn("seed=ada", post["user"]["profile_image"])
 
+    def test_shape_starts_with_no_likes(self):
+        # _attach_likes fills these in for the posts that have likes.
+        post = app._shape_post_row(self._row())
+
+        self.assertEqual(post["like_count"], 0)
+        self.assertIs(post["liked_by_me"], False)
+
 
 class AggregateTagsTests(unittest.TestCase):
     def _row(self, pid, tag):
