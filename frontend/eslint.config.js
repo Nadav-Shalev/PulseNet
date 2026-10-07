@@ -31,6 +31,9 @@ export default defineConfig([
         ...globals.mocha,
         cy: 'readonly',
         Cypress: 'readonly',
+        // Chai assertions Cypress exposes globally.
+        expect: 'readonly',
+        assert: 'readonly',
       },
     },
   },
