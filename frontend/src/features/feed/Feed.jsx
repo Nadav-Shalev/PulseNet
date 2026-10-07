@@ -74,9 +74,10 @@ export default function Feed({ username, tag, feed, manage = false, emptyMessage
 
   return (
     <Box sx={{ px: 2 }}>
+      {/* One column on phones and tablets, two from md (900px) up. */}
       <Grid container spacing={2}>
         {posts.map(post => (
-          <Grid key={post.id} size={6}>
+          <Grid key={post.id} size={{ xs: 12, md: 6 }}>
             <SinglePost
               post={post}
               manage={manage}

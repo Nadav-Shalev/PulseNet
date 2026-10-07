@@ -27,10 +27,10 @@ export default function User({ user }) {
             {user.name?.[0] ?? '?'}
           </Avatar>
           <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" className="username-text" noWrap>
+            <Typography variant="body2" className="username-text" sx={{ overflowWrap: 'anywhere' }}>
               {user.name || user.username}
             </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap display="block">
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ overflowWrap: 'anywhere' }}>
               @{user.username}
             </Typography>
           </Box>
@@ -41,6 +41,7 @@ export default function User({ user }) {
         <Button
           variant="contained"
           size="small"
+          sx={{ whiteSpace: 'nowrap' }}
           onClick={() => navigate('/user-posts/' + user.username)}
         >
           See Posts

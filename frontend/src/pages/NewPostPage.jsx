@@ -106,9 +106,9 @@ export default function NewPostPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
       <Card sx={{ width: '100%', maxWidth: 600 }}>
-        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 4 }}>
+        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
           <Typography variant="h5" fontWeight={700}>Create New Post</Typography>
 
           {success && (
