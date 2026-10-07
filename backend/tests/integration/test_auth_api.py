@@ -8,8 +8,10 @@ the rows each request reads, and behavior is asserted on the recorded SQL/params
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import bcrypt
+import mysql.connector
 
 HERE = Path(__file__).resolve().parent
 TESTS_DIR = HERE.parent
@@ -178,6 +180,18 @@ class LogoutTests(unittest.TestCase):
         resp = client().post("/api/logout")
 
         self.assertEqual(resp.status_code, 401)
+
+    def test_logout_clears_cookie_even_if_the_delete_fails(self):
+        # require_session resolves the user, then the DELETE's own connection fails.
+        conn = FakeConn(fetchone=[_session_user()])
+        error = mysql.connector.errors.InterfaceError("2003: Can't connect to MySQL server")
+        c = client()
+        c.set_cookie("session_id", "this-sid")
+        with patch.object(app, "get_db_connection", side_effect=[conn, error]):
+            resp = c.post("/api/logout")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("session_id=;", _set_cookie_header(resp))
 
 
 if __name__ == "__main__":

@@ -63,6 +63,11 @@ class UploadValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported file type"):
             _validate_image_upload("avatar.svg", b"<svg xmlns='x'></svg>")
 
+    def test_valid_image_in_unsupported_format_is_rejected(self):
+        # A real BMP renamed to .png passes the extension check, not the content check.
+        with self.assertRaisesRegex(ValueError, "Unsupported image content"):
+            _validate_image_upload("avatar.png", _image_bytes("BMP"))
+
 
 if __name__ == "__main__":
     unittest.main()
