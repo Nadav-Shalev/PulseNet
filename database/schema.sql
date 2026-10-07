@@ -10,7 +10,14 @@ CREATE TABLE IF NOT EXISTS users (
     avatar        VARCHAR(500),
     profile_image VARCHAR(500),
     -- bcrypt hashes are ~60 chars; column is sized for safety and stores both salt+hash.
-    password_hash VARCHAR(255) NOT NULL DEFAULT ''
+    password_hash VARCHAR(255) NOT NULL DEFAULT '',
+    -- Roles and flags (migration 002). Admins are promoted with backend/manage.py
+    -- make-admin; agents have no password and cannot log in; personality is the
+    -- agent's persona text (NULL for people).
+    role          ENUM('user', 'admin') NOT NULL DEFAULT 'user',
+    is_banned     BOOLEAN NOT NULL DEFAULT FALSE,
+    is_agent      BOOLEAN NOT NULL DEFAULT FALSE,
+    personality   TEXT
 );
 
 -- Server-side session store. Cookie holds only the opaque session_id (slide 13);
