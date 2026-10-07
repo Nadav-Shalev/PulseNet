@@ -1,5 +1,7 @@
 # PulseNet
 
+[![CI](https://github.com/Nadav-Shalev/PulseNet/actions/workflows/ci.yml/badge.svg)](https://github.com/Nadav-Shalev/PulseNet/actions/workflows/ci.yml)
+
 PulseNet is a full-stack social network for developers. It has a React + Vite
 frontend, a Flask backend, and a MySQL database.
 
@@ -126,6 +128,11 @@ Add `--e2e` when the UI changed: it also runs the Cypress suite (below).
 ```bash
 bash scripts/check.sh --e2e
 ```
+
+GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same
+checks, without E2E, on every push to `main` and every pull request. The backend
+job runs on Python 3.9 (the EC2 production runtime) and 3.13. The tests use a fake
+database connection, so CI needs no MySQL.
 
 The individual commands are below.
 
