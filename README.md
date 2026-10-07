@@ -106,6 +106,21 @@ scripts/run_frontend.sh
 
 ## Tests And Checks
 
+Run the full quality gate from the project root — the same checks every commit
+must pass:
+
+```bash
+bash scripts/check.sh
+```
+
+It runs the backend unit + integration tests under coverage, fails if total
+coverage drops below `fail_under` in `backend/.coveragerc`, then runs the frontend
+lint and production build. Every step runs even if an earlier one fails, and the
+script exits non-zero if any step failed. `fail_under` is a ratchet: it is raised
+as tests are added and never lowered (target: 85%).
+
+The individual commands are below.
+
 Backend tests:
 
 ```bash
