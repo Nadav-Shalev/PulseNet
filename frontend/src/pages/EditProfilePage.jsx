@@ -27,7 +27,7 @@ export default function EditProfilePage() {
   // Redirect to login once auth state is known and there's no user.
   useEffect(() => {
     if (authReady && !currentUser) navigate('/login');
-  }, [authReady, currentUser]);
+  }, [authReady, currentUser, navigate]);
 
   // Pre-fill the form from the current user.
   useEffect(() => {

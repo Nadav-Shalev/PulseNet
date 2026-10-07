@@ -45,13 +45,13 @@ export default function NewPostPage() {
 
   useEffect(() => {
     if (authReady && !currentUser) navigate('/login');
-  }, [authReady, currentUser]);
+  }, [authReady, currentUser, navigate]);
 
   useEffect(() => {
     if (!success) return;
     const timer = setTimeout(() => navigate('/'), 2000);
     return () => clearTimeout(timer);
-  }, [success]);
+  }, [success, navigate]);
 
   // Debounced tag search — case-insensitive on the backend.
   useEffect(() => {
