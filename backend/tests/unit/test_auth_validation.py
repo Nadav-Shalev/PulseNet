@@ -68,6 +68,24 @@ class SignupValidationTests(unittest.TestCase):
         # Assert
         self.assertEqual(error, "Username may only contain letters, numbers, underscores, and dots")
 
+    def test_rejects_fields_over_100_chars(self):
+        # The users columns are VARCHAR(100); the length check runs before the format checks.
+        expected = {
+            "name": "Name must be 100 characters or fewer",
+            "username": "Username must be 100 characters or fewer",
+            "email": "Email must be 100 characters or fewer",
+        }
+        for field, message in expected.items():
+            with self.subTest(field=field):
+                # Arrange
+                payload = _valid_signup(**{field: "a" * 101})
+
+                # Act
+                _normalized, error = app._validate_signup_payload(payload)
+
+                # Assert
+                self.assertEqual(error, message)
+
     def test_accepts_valid_signup_and_trims_fields(self):
         # Arrange
         payload = _valid_signup(name=" Ada ", username=" ada ", email=" ada@example.com ", bio=" hi ")

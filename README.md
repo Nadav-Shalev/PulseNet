@@ -121,7 +121,7 @@ It runs the backend unit + integration tests under coverage, fails if total
 coverage drops below `fail_under` in `backend/.coveragerc`, then runs the frontend
 lint and production build. Every step runs even if an earlier one fails, and the
 script exits non-zero if any step failed. `fail_under` is a ratchet: it is raised
-as tests are added and never lowered (target: 85%).
+as tests are added and never lowered (the project requires at least 85%).
 
 Add `--e2e` when the UI changed: it also runs the Cypress suite (below).
 

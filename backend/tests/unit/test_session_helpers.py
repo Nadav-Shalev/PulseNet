@@ -12,7 +12,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
         sys.path.insert(0, str(_p))
 
 import app  # noqa: E402
-from support import FakeConn  # noqa: E402
+from support import FakeConn, db_down  # noqa: E402
 
 
 class SessionHelperTests(unittest.TestCase):
@@ -41,6 +41,17 @@ class SessionHelperTests(unittest.TestCase):
         params = insert[0][1]
         self.assertEqual(params[0], token)
         self.assertEqual(params[1], 42)
+
+
+class CurrentUserFromCookieTests(unittest.TestCase):
+    def test_no_cookie_is_anonymous(self):
+        with app.app.test_request_context():
+            self.assertIsNone(app._current_user_from_cookie())
+
+    def test_db_error_is_treated_as_anonymous(self):
+        # Public pages personalize optionally, so a failed lookup must not abort them.
+        with app.app.test_request_context(headers={"Cookie": "session_id=abc"}), db_down():
+            self.assertIsNone(app._current_user_from_cookie())
 
 
 if __name__ == "__main__":

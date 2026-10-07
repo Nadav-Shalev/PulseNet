@@ -117,6 +117,13 @@ class SanitizeHtmlEdgeCaseTests(unittest.TestCase):
         self.assertNotIn("<script", html.lower())
         self.assertIn("intro text", html)
 
+    def test_already_safe_rel_is_not_duplicated(self):
+        html = sanitize_html(
+            '<a href="https://example.com" target="_blank" rel="noreferrer noopener">link</a>'
+        )
+
+        self.assertEqual(_first_anchor_attrs(html).get("rel"), "noreferrer noopener")
+
 
 if __name__ == "__main__":
     unittest.main()

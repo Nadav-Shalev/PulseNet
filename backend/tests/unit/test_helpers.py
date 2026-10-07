@@ -1,9 +1,10 @@
-"""Unit tests for pure helper functions in app.py (no DB, no mocks)."""
+"""Unit tests for pure helper functions in app.py (no DB)."""
 
 import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 TESTS_DIR = HERE.parent
@@ -50,6 +51,13 @@ class HtmlToTextTests(unittest.TestCase):
     def test_empty_input(self):
         self.assertEqual(app.html_to_text(""), "")
         self.assertEqual(app.html_to_text(None), "")
+
+    def test_without_bleach_tags_are_stripped_by_regex(self):
+        # html_to_text imports bleach lazily; a None entry in sys.modules makes that import fail.
+        with patch.dict(sys.modules, {"bleach": None}):
+            text = app.html_to_text("<p>a &amp; <b>b</b></p>")
+
+        self.assertEqual(text, "a & b")
 
 
 class ToHtmlTests(unittest.TestCase):
