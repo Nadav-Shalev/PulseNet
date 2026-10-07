@@ -7,17 +7,10 @@ import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import List from '@mui/material/List';
-import ListItemButton from '@mui/material/ListItemButton';
-import ListItemAvatar from '@mui/material/ListItemAvatar';
-import ListItemText from '@mui/material/ListItemText';
-import IconButton from '@mui/material/IconButton';
-import CloseIcon from '@mui/icons-material/Close';
+import Link from '@mui/material/Link';
 import Feed from '../features/feed/Feed';
-import { fetchUserProfile, followUser, unfollowUser, fetchFollowing } from '../api/api';
+import FollowListDialog from '../components/FollowListDialog';
+import { fetchUserProfile, followUser, unfollowUser } from '../api/api';
 import { UserContext } from '../context/UserContext';
 
 export default function UserProfilePage() {
@@ -30,14 +23,16 @@ export default function UserProfilePage() {
   const [following, setFollowing] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [followBusy, setFollowBusy] = useState(false);
-  const [followingOpen, setFollowingOpen] = useState(false);
-  const [followingList, setFollowingList] = useState([]);
-  const [followingLoading, setFollowingLoading] = useState(false);
+  // Which follow list is shown. `listKind` survives closing so the dialog title
+  // does not change while it fades out.
+  const [listOpen, setListOpen] = useState(false);
+  const [listKind, setListKind] = useState('followers');
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
+    setListOpen(false);
     fetchUserProfile(username)
       .then(u => {
         if (cancelled) return;
@@ -74,21 +69,13 @@ export default function UserProfilePage() {
   const isOwnProfile = currentUser && user && (user.is_self || currentUser.username === user.username);
   const canFollow = currentUser && user && !isOwnProfile;
 
-  const handleOpenFollowing = async () => {
-    setFollowingOpen(true);
-    setFollowingLoading(true);
-    try {
-      const rows = await fetchFollowing(username);   // reuses the Phase 1 endpoint
-      setFollowingList(Array.isArray(rows) ? rows : []);
-    } catch {
-      setFollowingList([]);
-    } finally {
-      setFollowingLoading(false);
-    }
+  const openList = (kind) => {
+    setListKind(kind);
+    setListOpen(true);
   };
 
   const goToProfile = (uname) => {
-    setFollowingOpen(false);                          // close cleanly before navigating
+    setListOpen(false);                               // close cleanly before navigating
     navigate(`/profile/${encodeURIComponent(uname)}`);
   };
 
@@ -107,6 +94,21 @@ export default function UserProfilePage() {
       </Box>
     );
   }
+
+  // A real <button> (keyboard and screen-reader friendly) styled like the text.
+  const countLink = (kind, label) => (
+    <Link
+      component="button"
+      type="button"
+      variant="body2"
+      color="text.secondary"
+      underline="hover"
+      data-testid={`${kind}-count`}
+      onClick={() => openList(kind)}
+    >
+      {label}
+    </Link>
+  );
 
   return (
     <Box sx={{ p: 2 }}>
@@ -127,20 +129,8 @@ export default function UserProfilePage() {
             </Typography>
           )}
           <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap' }}>
-            <Typography variant="body2" color="text.secondary">
-              <strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}
-            </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              onClick={isOwnProfile ? handleOpenFollowing : undefined}
-              sx={{
-                cursor: isOwnProfile ? 'pointer' : 'default',
-                '&:hover': isOwnProfile ? { textDecoration: 'underline' } : undefined,
-              }}
-            >
-              <strong>{user.following_count ?? 0}</strong> following
-            </Typography>
+            {countLink('followers', <><strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}</>)}
+            {countLink('following', <><strong>{user.following_count ?? 0}</strong> following</>)}
             <Typography variant="body2" color="text.secondary">
               <strong>{user.post_count ?? 0}</strong> {user.post_count === 1 ? 'post' : 'posts'}
             </Typography>
@@ -173,42 +163,14 @@ export default function UserProfilePage() {
 
       <Feed username={username} manage={!!isOwnProfile} />
 
-      {/* Own-profile only: list of users this person follows */}
-      <Dialog open={followingOpen} onClose={() => setFollowingOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ pr: 6 }}>
-          Following
-          <IconButton
-            onClick={() => setFollowingOpen(false)}
-            sx={{ position: 'absolute', right: 8, top: 8 }}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers>
-          {followingLoading ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-              Loading following...
-            </Typography>
-          ) : followingList.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-              You are not following anyone yet.
-            </Typography>
-          ) : (
-            <List disablePadding>
-              {followingList.map(u => (
-                <ListItemButton key={u.id} onClick={() => goToProfile(u.username)}>
-                  <ListItemAvatar>
-                    <Avatar src={u.profile_image || u.avatar} alt={u.name}>
-                      {u.name?.[0] ?? '?'}
-                    </Avatar>
-                  </ListItemAvatar>
-                  <ListItemText primary={u.name || `@${u.username}`} secondary={`@${u.username}`} />
-                </ListItemButton>
-              ))}
-            </List>
-          )}
-        </DialogContent>
-      </Dialog>
+      <FollowListDialog
+        open={listOpen}
+        kind={listKind}
+        username={user.username}
+        isOwnProfile={!!isOwnProfile}
+        onClose={() => setListOpen(false)}
+        onSelectUser={goToProfile}
+      />
     </Box>
   );
 }
