@@ -8,7 +8,9 @@
 // it here (child processes inherit process.env) lets Cypress launch normally,
 // whether you run from VS Code, an external terminal, or CI.
 //
-// Usage (via package.json scripts): node scripts/run-cypress.mjs <run|open>
+// Usage (via package.json scripts): node scripts/run-cypress.mjs <run|open> [cypress run args]
+// Extra args are parsed like the Cypress CLI, e.g. `npm run cy:run -- --spec cypress/e2e/auth_flow.cy.js`.
+// scripts/e2e.mjs launches this script too, once it has started its own servers.
 
 delete process.env.ELECTRON_RUN_AS_NODE;
 
@@ -22,7 +24,8 @@ async function main() {
     return;
   }
 
-  const results = await cypress.run();
+  const options = await cypress.cli.parseRunArguments(['cypress', 'run', ...process.argv.slice(3)]);
+  const results = await cypress.run(options);
   // cypress.run() resolves (never rejects) for both outcomes:
   //  - a run that couldn't start (config error, no specs) -> { status: 'failed' }
   //  - a completed run -> { totalFailed, ... }
