@@ -84,7 +84,6 @@ def _user_obj(user):
     return {
         "username": user["username"],
         "name": user["name"],
-        "email": user["email"],
         "profile_image": user["profile_image"],
     }
 
@@ -130,13 +129,12 @@ def mock_get_article_by_id(article_id):
 
 
 def mock_search_users(q, limit=10, offset=0):
+    # Same contract as the DB search: match name/username only, never return email.
     q_lower = q.lower()
     results = [
-        {"id": u["id"], "name": u["name"], "username": u["username"],
-         "email": u["email"], "avatar": u["avatar"]}
+        {"id": u["id"], "name": u["name"], "username": u["username"], "avatar": u["avatar"]}
         for u in MOCK_USERS
         if q_lower in u["name"].lower()
         or q_lower in u["username"].lower()
-        or q_lower in u["email"].lower()
     ]
     return results[offset: offset + limit]

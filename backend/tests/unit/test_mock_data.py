@@ -72,19 +72,24 @@ class MockSearchUsersTests(unittest.TestCase):
     def _usernames(self, *args, **kwargs):
         return [u["username"] for u in mock_data.mock_search_users(*args, **kwargs)]
 
-    def test_matches_name_username_or_email_case_insensitively(self):
+    def test_matches_name_or_username_case_insensitively(self):
         self.assertEqual(self._usernames("CAROL"), ["carolscript"])       # name / username
         self.assertEqual(self._usernames("Bob Coder"), ["bobcoder"])      # name only
-        self.assertEqual(self._usernames("alicedev@"), ["alicedev"])      # email only
+
+    def test_email_is_not_searched(self):
+        # Emails are private; matching on one would reveal whose address it is.
+        self.assertEqual(self._usernames("alicedev@"), [])
+        self.assertEqual(self._usernames("dev.to"), [])
 
     def test_result_has_search_fields_only(self):
         user = mock_data.mock_search_users("alice")[0]
 
-        self.assertEqual(set(user), {"id", "name", "username", "email", "avatar"})
+        self.assertEqual(set(user), {"id", "name", "username", "avatar"})
 
     def test_limit_and_offset(self):
-        self.assertEqual(self._usernames("dev.to", limit=2), ["alicedev", "bobcoder"])
-        self.assertEqual(self._usernames("dev.to", limit=2, offset=2), ["carolscript"])
+        # "c" is in every mock username (alicedev, bobcoder, carolscript).
+        self.assertEqual(self._usernames("c", limit=2), ["alicedev", "bobcoder"])
+        self.assertEqual(self._usernames("c", limit=2, offset=2), ["carolscript"])
 
     def test_no_match_is_empty(self):
         self.assertEqual(mock_data.mock_search_users("zzz"), [])
