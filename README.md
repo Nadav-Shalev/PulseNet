@@ -121,6 +121,12 @@ lint and production build. Every step runs even if an earlier one fails, and the
 script exits non-zero if any step failed. `fail_under` is a ratchet: it is raised
 as tests are added and never lowered (target: 85%).
 
+Add `--e2e` when the UI changed: it also runs the Cypress suite (below).
+
+```bash
+bash scripts/check.sh --e2e
+```
+
 The individual commands are below.
 
 Backend tests:
@@ -146,17 +152,26 @@ npm run lint
 npm run build
 ```
 
-Cypress E2E:
-
-```bash
-cd backend
-python app.py
-```
+Cypress E2E, self-contained (MySQL must be running; ports 5000 and 5173 free):
 
 ```bash
 cd frontend
-npm run dev
-npm run cy:run
+npm run test:e2e                                        # all specs
+npm run test:e2e -- --spec cypress/e2e/auth_flow.cy.js  # one spec
+```
+
+`scripts/e2e.mjs` rebuilds a separate `pulsenet_e2e` database with
+`backend/migrate.py --reset`, starts the backend on it (fake LLM, mail to files) and
+the Vite dev server, runs Cypress, then stops both servers. The dev database is never
+touched. Server output goes to `frontend/cypress/logs/`. Shared setup commands
+(`cy.apiSignup`, `cy.apiLogin`, `cy.apiCreatePost`) live in
+`frontend/cypress/support/commands.js`.
+
+Against servers you already started yourself (`python app.py`, `npm run dev`):
+
+```bash
+cd frontend
+npm run cy:run   # or cy:open for the interactive runner
 ```
 
 `npm run cy:run` / `npm run cy:open` go through `scripts/run-cypress.mjs`, which
