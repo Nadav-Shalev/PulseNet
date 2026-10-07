@@ -38,6 +38,8 @@ frontend/cypress/videos/
 *.tif
 *.tiff
 *.svg
+# ...except documentation images (the ERD)
+!docs/*.png
 
 # OS / IDE
 .DS_Store
