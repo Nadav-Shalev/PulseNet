@@ -25,4 +25,4 @@ PulseNet/
 ```
 
 Run the backend from `backend/`, the frontend from `frontend/`, and database setup
-from the project root using `database/schema.sql`.
+from the project root with `python backend/migrate.py` (see `database/README.md`).

@@ -41,11 +41,14 @@ DB_PASSWORD=your_password
 DB_NAME=pulsenet_db
 ```
 
-Create the database from the project root:
+Create the database (or apply pending schema changes) from the project root:
 
 ```bash
-mysql -u root -p < database/schema.sql
+python backend/migrate.py
 ```
+
+Schema changes are numbered files in `database/migrations/`; see
+[`database/README.md`](../database/README.md).
 
 Optionally seed the database:
 
