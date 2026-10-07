@@ -93,6 +93,11 @@ mysql -h database-xxxx.eu-central-1.rds.amazonaws.com -u admin -p < ~/schema.sql
 
 `schema.sql` itself runs `CREATE DATABASE IF NOT EXISTS pulsenet_db;`, so it creates the database and all the tables in one shot.
 
+> Later schema changes are not loaded this way: `schema.sql` cannot alter tables that
+> already exist. After the first deploy, every change is a numbered migration that
+> `python backend/migrate.py` applies on the EC2 (see `database/README.md`). The first
+> run stamps this database as `000_baseline`.
+
 I verify that 6 tables were created:
 
 ```bash

@@ -10,7 +10,7 @@ show_missing = True
 skip_empty = True
 # Coverage ratchet: `coverage report` fails below this total. It is raised as tests
 # are added and never lowered; the project target is 85.
-fail_under = 49
+fail_under = 59
 # Script entry points (`python app.py`, `python seed_data.py`) are run by hand, not
 # exercised by the test suite.
 exclude_also =

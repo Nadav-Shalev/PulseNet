@@ -62,11 +62,13 @@ DB_PASSWORD=your_password
 DB_NAME=pulsenet_db
 ```
 
-Create the database from the project root:
+Create the database (or apply pending schema changes) from the project root:
 
 ```bash
-mysql -u root -p < database/schema.sql
+python backend/migrate.py
 ```
+
+See [database/README.md](database/README.md) for how migrations work.
 
 Start the API:
 
@@ -169,7 +171,7 @@ from starting.
 ## Documentation
 
 - Backend details: [backend/README.md](backend/README.md)
-- Database schema: [database/schema.sql](database/schema.sql)
+- Database schema: [database/schema.sql](database/schema.sql), migrations: [database/README.md](database/README.md)
 - ER diagram: [docs/db-diagram.md](docs/db-diagram.md)
 - Project structure: [docs/project_structure.md](docs/project_structure.md)
 - AWS deployment notes: [docs/aws_deployment.md](docs/aws_deployment.md)
