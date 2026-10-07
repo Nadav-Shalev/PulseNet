@@ -43,3 +43,9 @@ Cypress.Commands.add('apiCreatePost', ({ title, bodyHtml, tags = [], mainImage =
   }
   return cy.request('POST', api('/articles'), { article }).its('body')
 })
+
+// Follow a user as the logged-in user. The follower comes from the session cookie.
+//   cy.apiFollow(author.id)
+Cypress.Commands.add('apiFollow', (userId) =>
+  cy.request('POST', api(`/users/${userId}/follow`)).its('body'),
+)

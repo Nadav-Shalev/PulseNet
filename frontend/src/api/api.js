@@ -103,11 +103,22 @@ export const unfollowUser = async (userId) => {
   return data;
 };
 
-export const fetchFollowers = (username) =>
-  fetch(`${BASE}/users/${encodeURIComponent(username)}/followers`, CREDS).then(r => r.json());
+// Public lists: `side` is 'followers' (who follows <username>) or 'following'
+// (who <username> follows). Throws on 404 / 503 so the profile can show an error.
+const fetchFollowList = async (username, side) => {
+  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/${side}`, CREDS);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
 
-export const fetchFollowing = (username) =>
-  fetch(`${BASE}/users/${encodeURIComponent(username)}/following`, CREDS).then(r => r.json());
+export const fetchFollowers = (username) => fetchFollowList(username, 'followers');
+
+export const fetchFollowing = (username) => fetchFollowList(username, 'following');
 
 // Author is derived from the session cookie on the backend — no email arg.
 // `bodyHtml` is the WYSIWYG editor's HTML; the backend sanitizes it server-side.
