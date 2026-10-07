@@ -91,9 +91,9 @@ class CreateArticleSanitizationTests(unittest.TestCase):
 
 
 class CreateArticleValidationTests(unittest.TestCase):
-    def _post(self, article):
-        conn = FakeConn(fetchone=[_session_user()])
-        with patch_db(conn):
+    def _post(self, article, fetchone=()):
+        self.conn = FakeConn(fetchone=[_session_user(), *fetchone])
+        with patch_db(self.conn):
             return _authed_client().post("/api/articles", json={"article": article})
 
     def test_empty_title_returns_400(self):
@@ -117,6 +117,33 @@ class CreateArticleValidationTests(unittest.TestCase):
     def test_html_without_text_returns_400(self):
         resp = self._post({"title": "T", "body_html": "<p>&nbsp;</p><p> </p>"})
         self.assertEqual(resp.status_code, 400)
+
+    def test_non_string_tag_returns_400_before_anything_is_stored(self):
+        # 123 used to crash on .strip() with a 500, after INSERT INTO posts had run.
+        for bad in (123, None, True, ["react"], {"name": "react"}):
+            with self.subTest(tag=bad):
+                resp = self._post({"title": "T", "body_html": "<p>hi</p>", "tags": ["ok", bad]})
+
+                self.assertEqual(resp.status_code, 400)
+                self.assertEqual(resp.get_json()["error"], "Each tag must be a string")
+                self.assertFalse(self.conn.ran("insert into posts"))
+                self.assertFalse(self.conn.ran("insert ignore into tags"))
+
+    def test_tag_longer_than_the_column_returns_400_before_anything_is_stored(self):
+        # tags.name is VARCHAR(100): MySQL would reject (or truncate) a longer one.
+        resp = self._post({"title": "T", "body_html": "<p>hi</p>", "tags": ["ok", "x" * 101]})
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json()["error"], "Tags must be 100 characters or fewer")
+        self.assertFalse(self.conn.ran("insert into posts"))
+
+    def test_tag_length_is_counted_after_trimming(self):
+        # Exactly 100 characters fits, also when the user typed spaces around it.
+        resp = self._post({"title": "T", "body_html": "<p>hi</p>",
+                           "tags": ["  " + "x" * 100 + "  "]}, fetchone=[(3,)])
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(self.conn.params_for("insert ignore into tags"), ("x" * 100,))
 
 
 class CreateArticleStorageTests(unittest.TestCase):

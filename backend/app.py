@@ -672,6 +672,15 @@ def create_article():
     if len(tags) > 10:
         return jsonify({"error": "You can add at most 10 tags"}), 400
 
+    # Validate every tag before the post is inserted, so a bad one is a 400 and
+    # not a crash halfway through. Blanks are skipped; the trimmed name must fit
+    # tags.name VARCHAR(100).
+    if any(not isinstance(tag, str) for tag in tags):
+        return jsonify({"error": "Each tag must be a string"}), 400
+    tags = [tag for tag in (t.strip() for t in tags) if tag]
+    if any(len(tag) > 100 for tag in tags):
+        return jsonify({"error": "Tags must be 100 characters or fewer"}), 400
+
     # Author is derived from the session, not from the request body.
     user = g.current_user
 
@@ -690,9 +699,6 @@ def create_article():
     for tag_name in tags:
         # Preserve exact casing — tags.name uses utf8mb4_bin so "react" and "React"
         # are distinct rows. INSERT IGNORE + UNIQUE prevents exact-case duplicates.
-        tag_name = tag_name.strip()
-        if not tag_name:
-            continue
         cursor2.execute("INSERT IGNORE INTO tags (name) VALUES (%s)", (tag_name,))
         cursor2.execute("SELECT id FROM tags WHERE name = %s", (tag_name,))
         tag_id = cursor2.fetchone()[0]
