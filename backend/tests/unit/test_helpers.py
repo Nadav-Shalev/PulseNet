@@ -159,5 +159,52 @@ class FileExtTests(unittest.TestCase):
         self.assertFalse(app._ext_ok("a.txt"))
 
 
+class JsonObjectTests(unittest.TestCase):
+    def test_missing_body_is_an_empty_object(self):
+        self.assertEqual(app._json_object(None), {})
+
+    def test_an_object_is_returned_as_is(self):
+        data = {"a": 1}
+
+        self.assertIs(app._json_object(data), data)
+
+    def test_any_other_json_type_raises_input_error_naming_the_value(self):
+        for value in (["a"], [], "text", "", 0, 123, True, False):
+            with self.subTest(value=value):
+                with self.assertRaises(app.InputError) as ctx:
+                    app._json_object(value, "article")
+
+                self.assertEqual(str(ctx.exception), "article must be a JSON object")
+
+
+class StrFieldTests(unittest.TestCase):
+    def test_missing_and_null_read_as_empty_string(self):
+        self.assertEqual(app._str_field({}, "title"), "")
+        self.assertEqual(app._str_field({"title": None}, "title"), "")
+
+    def test_strings_are_trimmed_by_default(self):
+        self.assertEqual(app._str_field({"title": "  Hi  "}, "title"), "Hi")
+
+    def test_strip_false_keeps_the_value_exactly(self):
+        # Passwords and raw HTML must reach their checks untouched.
+        self.assertEqual(app._str_field({"password": " pw "}, "password", strip=False), " pw ")
+
+    def test_non_string_raises_input_error_naming_the_field(self):
+        # 0, False and [] are falsy: the old `(x or "")` let them through as "".
+        for value in (0, 123, 1.5, True, False, [], ["a"], {}, {"a": 1}):
+            with self.subTest(value=value):
+                with self.assertRaises(app.InputError) as ctx:
+                    app._str_field({"title": value}, "title")
+
+                self.assertEqual(str(ctx.exception), "title must be a string")
+
+    def test_input_error_is_a_400_with_the_message(self):
+        with app.app.test_request_context():
+            resp, status = app._bad_input(app.InputError("title must be a string"))
+
+        self.assertEqual(status, 400)
+        self.assertEqual(resp.get_json(), {"error": "title must be a string"})
+
+
 if __name__ == "__main__":
     unittest.main()

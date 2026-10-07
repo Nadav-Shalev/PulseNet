@@ -135,5 +135,31 @@ class LoginValidationTests(unittest.TestCase):
         self.assertEqual(normalized["password"], "S3cret-pass!")
 
 
+class PayloadTypeTests(unittest.TestCase):
+    def test_body_that_is_not_an_object_raises_input_error(self):
+        for validate in (app._validate_signup_payload, app._validate_login_payload):
+            with self.subTest(validate=validate.__name__):
+                with self.assertRaises(app.InputError):
+                    validate(["ada@example.com"])
+
+    def test_missing_body_is_reported_as_missing_fields(self):
+        _normalized, error = app._validate_login_payload(None)
+
+        self.assertEqual(error, "email and password are required")
+
+    def test_non_string_password_raises_instead_of_reaching_bcrypt(self):
+        # A numeric password used to reach .encode() in _hash_password -> 500.
+        with self.assertRaises(app.InputError) as ctx:
+            app._validate_signup_payload(_valid_signup(password=12345678))
+
+        self.assertEqual(str(ctx.exception), "password must be a string")
+
+    def test_password_is_not_trimmed(self):
+        normalized, error = app._validate_signup_payload(_valid_signup(password=" pw "))
+
+        self.assertIsNone(error)
+        self.assertEqual(normalized["password"], " pw ")
+
+
 if __name__ == "__main__":
     unittest.main()

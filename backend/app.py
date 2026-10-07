@@ -199,6 +199,39 @@ def is_db_available():
         return False
 
 
+# ─── Request input: JSON type checks ─────────────────────────────────────────
+
+class InputError(ValueError):
+    """A request field has the wrong JSON type. The errorhandler below turns it
+    into a 400, so a number where a string belongs is a client error, not a 500."""
+
+
+@app.errorhandler(InputError)
+def _bad_input(e):
+    return jsonify({"error": str(e)}), 400
+
+
+def _json_object(value, name="Request body"):
+    """``value`` as a dict: ``{}`` when it is missing/null, InputError when it is
+    a list, string, number or bool (``.get()`` on those used to crash)."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise InputError(f"{name} must be a JSON object")
+    return value
+
+
+def _str_field(data, key, strip=True):
+    """``data[key]`` as a string: ``""`` when missing/null, trimmed unless
+    ``strip=False``. Any other JSON type raises InputError."""
+    value = data.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise InputError(f"{key} must be a string")
+    return value.strip() if strip else value
+
+
 # ─── Auth: session helpers & require_session decorator ───────────────────────
 
 SESSION_COOKIE_NAME    = "session_id"
@@ -231,13 +264,15 @@ def _verify_password(password, password_hash):
 
 
 def _validate_signup_payload(data):
-    data = data or {}
+    """Returns (payload, error message or None). A wrong JSON type raises
+    InputError (-> 400) instead."""
+    data = _json_object(data)
     payload = {
-        "name": (data.get("name") or "").strip(),
-        "username": (data.get("username") or "").strip(),
-        "email": (data.get("email") or "").strip(),
-        "bio": (data.get("bio") or "").strip(),
-        "password": data.get("password") or "",
+        "name": _str_field(data, "name"),
+        "username": _str_field(data, "username"),
+        "email": _str_field(data, "email"),
+        "bio": _str_field(data, "bio"),
+        "password": _str_field(data, "password", strip=False),
     }
 
     if not payload["name"] or not payload["username"] or not payload["email"]:
@@ -265,10 +300,11 @@ def _validate_signup_payload(data):
 
 
 def _validate_login_payload(data):
-    data = data or {}
+    """Same contract as _validate_signup_payload."""
+    data = _json_object(data)
     payload = {
-        "email": (data.get("email") or "").strip(),
-        "password": data.get("password") or "",
+        "email": _str_field(data, "email"),
+        "password": _str_field(data, "password", strip=False),
     }
     if not payload["email"] or not payload["password"]:
         return payload, "email and password are required"
@@ -636,13 +672,13 @@ def create_article():
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
-    data     = request.get_json() or {}
-    article  = data.get("article") or {}
-    title    = (article.get("title") or "").strip()
-    raw_html = article.get("body_html") or ""
-    body_md  = (article.get("body_markdown") or "").strip()
+    data     = _json_object(request.get_json())
+    article  = _json_object(data.get("article"), "article")
+    title    = _str_field(article, "title")
+    raw_html = _str_field(article, "body_html", strip=False)
+    body_md  = _str_field(article, "body_markdown")
     tags     = article.get("tags") or []
-    cover    = (article.get("main_image") or "").strip() or None
+    cover    = _str_field(article, "main_image") or None
 
     if not title:
         return jsonify({"error": "title is required"}), 400
@@ -877,7 +913,7 @@ def create_user():
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
-    payload, validation_error = _validate_signup_payload(request.get_json() or {})
+    payload, validation_error = _validate_signup_payload(request.get_json())
     if validation_error:
         return jsonify({"error": validation_error}), 400
 
@@ -938,7 +974,7 @@ def login():
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
-    payload, validation_error = _validate_login_payload(request.get_json() or {})
+    payload, validation_error = _validate_login_payload(request.get_json())
     if validation_error:
         return jsonify({"error": validation_error}), 400
     email    = payload["email"]
@@ -985,8 +1021,9 @@ def logout():
     ("log out this device"). ``require_session`` gates both — an absent/expired
     cookie yields 401 after expired rows have been purged."""
     sid         = request.cookies.get(SESSION_COOKIE_NAME)
-    data        = request.get_json(silent=True) or {}   # no body / no JSON header is fine
-    all_devices = bool(data.get("allDevices"))
+    data        = request.get_json(silent=True)   # no body / no JSON header is fine
+    # A junk body (a list, a string) must not block a logout: read it as {}.
+    all_devices = isinstance(data, dict) and bool(data.get("allDevices"))
     try:
         conn   = get_db_connection()
         cursor = conn.cursor()
@@ -1023,22 +1060,22 @@ def update_me():
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
-    data = request.get_json() or {}
+    data = _json_object(request.get_json())
     user = g.current_user
 
     # Only these three fields are editable; keys below are fixed (never user input).
     fields = {}
     if "name" in data:
-        name = (data.get("name") or "").strip()
+        name = _str_field(data, "name")
         if not name:
             return jsonify({"error": "Name cannot be empty"}), 400
         if len(name) > 100:
             return jsonify({"error": "Name must be 100 characters or fewer"}), 400
         fields["name"] = name
     if "bio" in data:
-        fields["bio"] = (data.get("bio") or "").strip()
+        fields["bio"] = _str_field(data, "bio")
     if "profile_image" in data:
-        img = (data.get("profile_image") or "").strip()
+        img = _str_field(data, "profile_image")
         if len(img) > 500:
             return jsonify({"error": "Image URL is too long"}), 400
         fields["profile_image"] = img or None
