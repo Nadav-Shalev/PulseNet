@@ -9,8 +9,10 @@ omit =
 show_missing = True
 skip_empty = True
 # Coverage ratchet: `coverage report` fails below this total. It is raised as tests
-# are added and never lowered; the project target is 85.
-fail_under = 59
+# are added and never lowered; the project target is 85. Kept about a point below
+# the measured total, since CI also measures on Python 3.9 and branch counts
+# differ slightly between Python versions.
+fail_under = 74
 # Script entry points (`python app.py`, `python seed_data.py`) are run by hand, not
 # exercised by the test suite.
 exclude_also =
