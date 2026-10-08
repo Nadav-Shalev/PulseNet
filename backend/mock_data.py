@@ -100,9 +100,10 @@ def _post_shape(post):
         "readable_publish_date": post["readable_publish_date"],
         "url": post["devto_url"],
         "tag_list": list(post["tags"]),
-        # Same fields as the DB feed; mock posts have no likes.
+        # Same fields as the DB feed; mock posts have no likes or comments.
         "like_count": 0,
         "liked_by_me": False,
+        "comment_count": 0,
         "user": _user_obj(user),
     }
 
