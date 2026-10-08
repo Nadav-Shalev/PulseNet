@@ -13,10 +13,12 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import SpellcheckIcon from '@mui/icons-material/Spellcheck';
 import { aiCorrect, aiSuggestComment, createComment, deleteComment, fetchComments } from '../api/api';
 import { UserContext } from '../context/UserContext';
 import { AiSuggestion, useAiAssist } from './AiSuggestion';
+import ReportDialog from './ReportDialog';
 import { textToHtml } from '../utils/textToHtml';
 import { timeAgo } from '../utils/timeAgo';
 
@@ -102,6 +104,9 @@ export default function CommentsSection({ postId, onCountChange }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
   const [toDelete, setToDelete] = useState(null);     // the comment awaiting confirmation
+  const [toReport, setToReport] = useState(null);     // the comment being reported
+  // The server checks the role again; this only decides which buttons to show.
+  const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
     let cancelled = false;                 // the dialog closed before the reply came
@@ -181,6 +186,8 @@ export default function CommentsSection({ postId, onCountChange }) {
   const renderComment = (c, isReply) => {
     const username = c.user?.username;
     const mine = !!currentUser && currentUser.username === username;
+    // An admin may delete anyone's comment (moderation); others may report it.
+    const canDelete = mine || isAdmin;
     return (
       <Box data-testid="comment" sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
         <Avatar
@@ -192,8 +199,8 @@ export default function CommentsSection({ postId, onCountChange }) {
           {c.user?.name?.[0] ?? '?'}
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          {/* The delete button keeps its own column, so a wrapped name line on a phone
-              does not push it onto a line of its own. */}
+          {/* The report and delete buttons keep their own column, so a wrapped name
+              line on a phone does not push them onto a line of their own. */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
             <Box sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 1 }}>
               <Typography variant="subtitle2" component="span">
@@ -203,19 +210,32 @@ export default function CommentsSection({ postId, onCountChange }) {
                 @{username} · {timeAgo(c.created_at)}
               </Typography>
             </Box>
-            {mine && (
-              <IconButton
-                size="small"
-                aria-label="Delete comment"
-                title="Delete"
-                onClick={() => setToDelete(c)}
-                disabled={busy}
-                data-testid="comment-delete"
-                sx={{ mt: -0.5 }}
-              >
-                <DeleteOutlineIcon fontSize="small" />
-              </IconButton>
-            )}
+            <Box sx={{ display: 'flex', mt: -0.5 }}>
+              {currentUser && !mine && (
+                <IconButton
+                  size="small"
+                  aria-label="Report comment"
+                  title="Report"
+                  onClick={() => setToReport(c)}
+                  data-testid="comment-report"
+                >
+                  <FlagOutlinedIcon fontSize="small" />
+                </IconButton>
+              )}
+              {canDelete && (
+                <IconButton
+                  size="small"
+                  color={mine ? 'default' : 'error'}
+                  aria-label={mine ? 'Delete comment' : 'Delete comment (admin)'}
+                  title={mine ? 'Delete' : 'Delete (admin)'}
+                  onClick={() => setToDelete(c)}
+                  disabled={busy}
+                  data-testid="comment-delete"
+                >
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              )}
+            </Box>
           </Box>
           {/* body_html is sanitized by the backend, like a post body. */}
           <Typography
@@ -310,6 +330,16 @@ export default function CommentsSection({ postId, onCountChange }) {
         </Typography>
       )}
       {thread}
+
+      {toReport && (
+        <ReportDialog
+          key={toReport.id}
+          target={{ commentId: toReport.id }}
+          kind="comment"
+          onClose={() => setToReport(null)}
+          onUnauthorized={() => navigate('/login')}
+        />
+      )}
 
       <Dialog open={!!toDelete} onClose={() => !busy && setToDelete(null)}>
         <DialogTitle>Delete this comment?</DialogTitle>

@@ -229,8 +229,9 @@ Cookie: session_id=...
 { "deleted": true, "id": 8, "comment_count": 1 }
 ```
 
-Returns `401` without a valid session, `403` for someone else's comment, `404` if
-the comment does not exist, and `503` when the database is unavailable.
+Returns `401` without a valid session, `403` for someone else's comment (an admin
+may delete any comment, and `deleteArticle` any post), `404` if the comment does not
+exist, and `503` when the database is unavailable.
 
 ### `aiCorrect(text, format)` / `aiSuggestPost(title, tags)` / `aiSuggestComment(postId, parentId)`
 
@@ -248,6 +249,43 @@ input, `401` without a session, `404` for a missing post, `429` when a daily AI
 limit (the user's or the site's) or the provider's rate limit is reached, and `503`
 when AI assistance is off or failing.
 
+### `reportContent(target, reason, details)`
+
+Report someone else's post (`{ postId }`) or comment (`{ commentId }`) to the admins.
+`reason` is one of `REPORT_REASONS` (`spam`, `harassment`, `hate`, `misinformation`,
+`other`); `details` is an optional plain-text note, 500 characters at most. The UI is
+`components/ReportDialog.jsx`, behind the flag on each post card and comment.
+
+**Request**
+```
+POST /api/reports
+Cookie: session_id=...
+{ "post_id": 12, "comment_id": null, "reason": "spam", "details": "an ad" }
+```
+
+**Response** `201`, or `200` with `"already": true` when this user had reported it before
+```json
+{ "reported": true, "already": false, "id": 3 }
+```
+
+Throws with `status` `400` (no target or two, a bad reason, a note too long, your own
+content), `401`, `404` (the post or comment is gone) or `503`.
+
+### Admin: `fetchReports`, `resolveReport`, `fetchAdminUsers`, `banUser`, `unbanUser`
+
+For the `/admin` page (`pages/AdminPage.jsx`). Anyone but an admin gets `403`.
+
+| Function | Request | Resolves to |
+| --- | --- | --- |
+| `fetchReports(status = 'open')` | `GET /api/admin/reports?status=open\|resolved` | up to 100 reports, newest first: `{id, reason, details, status, created_at, resolved_at, resolved_by, reporter: {username}, target: {type, id, post_id, post_title, excerpt}, author: {id, username, is_banned}}` |
+| `resolveReport(id)` | `POST /api/admin/reports/<id>/resolve` | `{id, status: "resolved"}` |
+| `fetchAdminUsers(q = '', bannedOnly = false)` | `GET /api/admin/users?q=...&banned=1` | up to 20 `{id, username, name, role, is_banned}` |
+| `banUser(id)` / `unbanUser(id)` | `POST` / `DELETE /api/admin/users/<id>/ban` | the user, as above |
+
+A ban logs the user out everywhere and blocks their login (`403`, "This account has
+been suspended") until an unban; their content and the reports about it stay.
+`banUser` answers `400` for yourself and `403` for another admin.
+
 ---
 
 ## Error Responses
@@ -260,7 +298,7 @@ All endpoints return JSON errors in this shape:
 Common status codes:
 - `400` — validation error (missing fields, value too long, etc.)
 - `401` — no valid session cookie
-- `403` — not allowed (e.g. someone else's comment)
+- `403` — not allowed (e.g. someone else's comment, an admin endpoint, a banned account's login)
 - `404` — resource not found
 - `422` — moderation blocked a post or comment as toxic; nothing was stored
 - `429` — a daily AI limit, or the AI provider's rate limit, was reached

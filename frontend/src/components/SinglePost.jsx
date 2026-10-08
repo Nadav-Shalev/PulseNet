@@ -25,16 +25,20 @@ import EditIcon from '@mui/icons-material/Edit';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutlineOutlined';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import {
   fetchArticleById, deleteArticle, removePostTag, likeArticle, unlikeArticle,
 } from '../api/api';
 import { UserContext } from '../context/UserContext';
 import CommentsSection from './CommentsSection';
+import ReportDialog from './ReportDialog';
 import { postTimeAgo } from '../utils/timeAgo';
 
 // `manage` enables owner-only controls (delete post, remove a hashtag). It is only
 // passed when the current user views their OWN profile, so it never appears in feeds
 // or on other users' profiles. onDeleted / onTagsChanged let the parent list update.
+// Any other logged-in reader can report the post; an admin can also delete it.
 export default function SinglePost({ post, manage = false, onDeleted, onTagsChanged }) {
   const [open, setOpen] = useState(false);
   const [fullHtml, setFullHtml] = useState(null);
@@ -52,6 +56,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const [likeError, setLikeError] = useState('');
   // Starts from the feed; the dialog's comment thread updates it after each change.
   const [commentCount, setCommentCount] = useState(post?.comment_count ?? 0);
+  const [reporting, setReporting] = useState(false);
   const { currentUser, authReady } = useContext(UserContext);
   const navigate = useNavigate();
   // Below sm (600px) the full post fills the screen instead of a narrow box.
@@ -115,6 +120,9 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   };
 
   const authorUsername = post?.user?.username;
+  const isAuthor = !!currentUser && currentUser.username === authorUsername;
+  // The server checks the role again; this only decides which buttons to show.
+  const isAdmin = currentUser?.role === 'admin';
   const authorName = post?.user?.name?.trim();
   // Show the name when present, otherwise @username (never the raw email).
   const displayName = authorName || (authorUsername ? `@${authorUsername}` : 'Unknown');
@@ -266,6 +274,30 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
               {commentCount}
             </Typography>
           </Box>
+          {currentUser && !isAuthor && (
+            <IconButton
+              size="small"
+              onClick={() => setReporting(true)}
+              aria-label="Report post"
+              title="Report"
+              data-testid="report-post"
+            >
+              <FlagOutlinedIcon fontSize="small" />
+            </IconButton>
+          )}
+          {/* Moderation: an admin deletes anyone's post (their own: through manage). */}
+          {isAdmin && !manage && (
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => { setManageError(''); setConfirmOpen(true); }}
+              aria-label="Delete post (admin)"
+              title="Delete (admin)"
+              data-testid="admin-delete-post"
+            >
+              <DeleteOutlineIcon fontSize="small" />
+            </IconButton>
+          )}
           {manage && managing && (
             <Button
               variant="outlined"
@@ -285,12 +317,22 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
         )}
       </Card>
 
-      {/* Owner-only delete confirmation */}
+      {reporting && (
+        <ReportDialog
+          target={{ postId: post.id }}
+          kind="post"
+          onClose={() => setReporting(false)}
+          onUnauthorized={() => navigate('/login')}
+        />
+      )}
+
+      {/* Delete confirmation: the owner's, or an admin's */}
       <Dialog open={confirmOpen} onClose={() => !deleting && setConfirmOpen(false)}>
         <DialogTitle>Delete this post?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            "{post?.title || 'Untitled'}" will be permanently removed. This can't be undone.
+            "{post?.title || 'Untitled'}"{isAuthor ? '' : ` by @${authorUsername}`} will be
+            permanently removed, with its likes, comments and reports. This can't be undone.
           </Typography>
           {manageError && (
             <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>
@@ -305,6 +347,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
             variant="contained"
             onClick={handleDelete}
             disabled={deleting}
+            data-testid="post-delete-confirm"
             startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {deleting ? 'Deleting...' : 'Delete'}

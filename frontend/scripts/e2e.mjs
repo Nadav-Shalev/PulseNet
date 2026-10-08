@@ -152,6 +152,9 @@ async function main() {
   ]);
   log('servers ready, running Cypress');
 
+  // Cypress inherits this: its makeAdmin task (cypress.config.js) promotes users
+  // with manage.py on this database, and refuses any database not named *_e2e.
+  process.env.E2E_DB_NAME = E2E_DB;
   return runNode([path.join(FRONTEND_DIR, 'scripts', 'run-cypress.mjs'), 'run', ...process.argv.slice(2)]);
 }
 

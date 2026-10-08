@@ -30,6 +30,8 @@ export default function TopBar() {
   const [anchorElNav, setAnchorElNav] = useState(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const { currentUser, logout } = useContext(UserContext);
+  // Only decides whether the link shows: the admin page and API check the role again.
+  const isAdmin = currentUser?.role === 'admin';
   const navigate = useNavigate();
 
   const handleOpenNavMenu = (e) => setAnchorElNav(e.currentTarget);
@@ -126,6 +128,11 @@ export default function TopBar() {
                   <Typography sx={{ textAlign: 'center' }}>{page.label}</Typography>
                 </MenuItem>
               ))}
+              {isAdmin && (
+                <MenuItem component={Link} to="/admin" onClick={handleCloseNavMenu} data-testid="nav-admin-mobile">
+                  <Typography sx={{ textAlign: 'center' }}>Admin</Typography>
+                </MenuItem>
+              )}
               {currentUser && (
                 <MenuItem component={Link} to="/new-post" onClick={handleCloseNavMenu}>
                   <Typography sx={{ textAlign: 'center' }}>+ New Post</Typography>
@@ -167,6 +174,17 @@ export default function TopBar() {
                 {page.label}
               </Button>
             ))}
+
+            {isAdmin && (
+              <Button
+                component={Link}
+                to="/admin"
+                data-testid="nav-admin"
+                sx={{ my: 2, color: 'white', display: 'block' }}
+              >
+                Admin
+              </Button>
+            )}
 
             {currentUser ? (
               <Button data-testid="nav-logout" sx={{ my: 2, color: 'orange' }} onClick={() => setLogoutOpen(true)}>

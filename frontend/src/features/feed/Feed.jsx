@@ -66,7 +66,7 @@ export default function Feed({ username, tag, feed, manage = false, emptyMessage
     return () => observer.disconnect();
   }, [loading, hasMore]);
 
-  // Owner-management callbacks (only used when `manage` is true) keep the list in
+  // Owner-management callbacks (`manage`) and an admin's delete keep the list in
   // sync without a full refetch.
   const handleDeleted = (id) => setPosts(prev => prev.filter(p => p.id !== id));
   const handleTagsChanged = (id, tagList) =>

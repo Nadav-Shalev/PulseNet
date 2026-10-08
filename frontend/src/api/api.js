@@ -237,6 +237,53 @@ export const aiSuggestPost = (title, tags = []) =>
 export const aiSuggestComment = (postId, parentId = null) =>
   postJson('/ai/suggest-comment', { post_id: postId, parent_id: parentId }).then((data) => data.text);
 
+// Fetch `route` (GET unless `init` says otherwise) and resolve to its JSON reply;
+// a failure throws like postJson, with the backend's message and the HTTP `status`.
+const requestJson = async (route, init = {}) => {
+  const res = await fetch(`${BASE}${route}`, { ...CREDS, ...init });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+// The reasons a report can give, as the backend accepts them.
+export const REPORT_REASONS = [
+  { value: 'spam', label: 'Spam' },
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'hate', label: 'Hate' },
+  { value: 'misinformation', label: 'Misinformation' },
+  { value: 'other', label: 'Something else' },
+];
+
+// Report a post ({ postId }) or a comment ({ commentId }) to the admins, with a
+// reason and an optional note. Resolves to { reported, already }: `already` is
+// true when this user had reported it before.
+export const reportContent = ({ postId = null, commentId = null }, reason, details = '') =>
+  postJson('/reports', { post_id: postId, comment_id: commentId, reason, details });
+
+// Admin only (the backend answers 403 to anyone else).
+
+// The newest reports with `status` 'open' or 'resolved', each with its target,
+// the target's author and the reporter.
+export const fetchReports = (status = 'open') =>
+  requestJson(`/admin/reports?status=${encodeURIComponent(status)}`);
+
+// Dismiss a report: the content stays. (Deleting the content removes its reports.)
+export const resolveReport = (reportId) => postJson(`/admin/reports/${reportId}/resolve`, {});
+
+// Up to 20 users matching `q` (username or name), or only the banned ones.
+export const fetchAdminUsers = (q = '', bannedOnly = false) =>
+  requestJson(`/admin/users?q=${encodeURIComponent(q)}${bannedOnly ? '&banned=1' : ''}`);
+
+// Ban (logs the user out everywhere and blocks login) or unban. Resolves to the user.
+export const banUser = (userId) => postJson(`/admin/users/${userId}/ban`, {});
+
+export const unbanUser = (userId) => requestJson(`/admin/users/${userId}/ban`, { method: 'DELETE' });
+
 // Upload an image file to local backend storage; returns { url }. Used by the
 // post editor (cover image) and the Edit Profile page (avatar).
 export const uploadImage = async (file) => {

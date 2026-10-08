@@ -67,7 +67,8 @@ export default function LoginPage() {
             </Alert>
           )}
           {error && (
-            <Alert severity="error" onClose={() => setError('')}>
+            // e.g. a banned account's 403: "This account has been suspended"
+            <Alert severity="error" onClose={() => setError('')} data-testid="login-error">
               {error}
             </Alert>
           )}

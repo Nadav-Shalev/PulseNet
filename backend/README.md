@@ -96,6 +96,36 @@ environment variables win. Before doing anything it prints the MySQL version, ho
 and database it is about to change, but never the credentials. On the server that is
 the production database (RDS), so run it with `--dry-run` first.
 
+### Reports, bans and the admin page
+
+Any logged-in user can report someone else's post or comment
+(`POST /api/reports {post_id | comment_id, reason, details?}`; the reasons are
+`spam`, `harassment`, `hate`, `misinformation` and `other`). One report per user and
+target: the second answers `200 {"reported": true, "already": true}`. That comes from
+the table's unique keys (MySQL error 1062) and only from them: any other database
+error stays an error.
+
+An admin works through them on the `/admin` page:
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /api/admin/reports?status=open\|resolved` | the newest 100 reports, each with its target (post, or comment and its post), the target's author and the reporter; never an email |
+| `POST /api/admin/reports/<id>/resolve` | dismiss a report: the content stays (a second call keeps the first admin) |
+| `DELETE /api/articles/<id>`, `DELETE /api/comments/<id>` | an admin may delete anyone's post or comment; its reports go with it (`ON DELETE CASCADE`) |
+| `GET /api/admin/users?q=&banned=1` | up to 20 users by username or name (never email), or only the banned ones |
+| `POST` / `DELETE /api/admin/users/<id>/ban` | ban or unban |
+
+A ban sets `users.is_banned` and deletes all of the user's sessions in one commit, so
+they are logged out everywhere at once. After that, login answers `403` ("This account
+has been suspended", only once the password matched) and `require_session` skips them.
+An admin cannot ban themselves or another admin. A ban does not delete the user's
+content, and it leaves the reports about it open until an admin dismisses them or
+deletes the content.
+
+`/api/me` (and login and signup) carry the user's `role`, so the UI knows whether to
+show the admin page. That is a display hint only: every admin endpoint checks the role
+on the server.
+
 ## LLM Service
 
 `llm/` is the one place that talks to a language model. Features call
@@ -183,6 +213,9 @@ before it is stored; a blocked one is a `422` with its category (`harassment`,
 - A comment is checked after its post and parent are, so a `404` costs no LLM call.
   Moderation calls count against `LLM_DAILY_LIMIT`; once it is used up, the word
   list carries on alone.
+- What gets past it can be reported by readers, and an admin handles it (see
+  "Reports, bans and the admin page"). A post or comment blocked with `422` is not
+  stored anywhere.
 
 ## AI Assist
 

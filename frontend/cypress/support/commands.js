@@ -64,3 +64,11 @@ Cypress.Commands.add('apiComment', (postId, bodyHtml, parentId = null) =>
   cy.request('POST', api(`/articles/${postId}/comments`), { body_html: bodyHtml, parent_id: parentId })
     .its('body'),
 )
+
+// Report a post ({ postId }) or a comment ({ commentId }) as the logged-in user.
+// Yields { reported, already }.
+//   cy.apiReport({ postId: post.id }, 'spam', 'an ad')
+Cypress.Commands.add('apiReport', ({ postId = null, commentId = null }, reason = 'spam', details = '') =>
+  cy.request('POST', api('/reports'), { post_id: postId, comment_id: commentId, reason, details })
+    .its('body'),
+)
