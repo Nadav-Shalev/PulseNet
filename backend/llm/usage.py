@@ -8,7 +8,7 @@ MemoryUsageStore keeps the same rows in a list, for tests.
 """
 
 import datetime
-from typing import NamedTuple, Optional, Protocol
+from typing import NamedTuple, Optional, Protocol, Tuple
 
 STATUSES = ("ok", "error", "timeout", "rate_limited", "over_limit")
 
@@ -33,6 +33,9 @@ class UsageStore(Protocol):
     def count(self, usage_day: datetime.date) -> int:
         """Calls on ``usage_day`` that reached a provider: every status but over_limit."""
 
+    def count_for_user(self, usage_day: datetime.date, user_id: int, purposes: Tuple[str, ...]) -> int:
+        """The same, for one user and only the calls made for one of ``purposes``."""
+
     def record(self, entry: UsageRecord) -> None:
         """Log one call."""
 
@@ -40,6 +43,13 @@ class UsageStore(Protocol):
 _COUNT_SQL = """
     SELECT COUNT(*) FROM llm_usage
     WHERE usage_day = %s AND status <> 'over_limit'
+"""
+# idx_llm_usage_user (user_id, usage_day) finds the user's day; the purposes and
+# statuses are filtered among those few rows.
+_USER_COUNT_SQL = """
+    SELECT COUNT(*) FROM llm_usage
+    WHERE user_id = %s AND usage_day = %s AND status <> 'over_limit'
+      AND purpose IN ({placeholders})
 """
 _INSERT_SQL = """
     INSERT INTO llm_usage (usage_day, provider, model, purpose, user_id, status,
@@ -57,10 +67,18 @@ class DbUsageStore:
         self._connect = connect
 
     def count(self, usage_day):
+        return self._count(_COUNT_SQL, (usage_day,))
+
+    def count_for_user(self, usage_day, user_id, purposes):
+        purposes = _purposes(purposes)
+        sql = _USER_COUNT_SQL.format(placeholders=", ".join(["%s"] * len(purposes)))
+        return self._count(sql, (user_id, usage_day, *purposes))
+
+    def _count(self, sql, params):
         conn = self._connect()
         try:
             cursor = conn.cursor()
-            cursor.execute(_COUNT_SQL, (usage_day,))
+            cursor.execute(sql, params)
             row = cursor.fetchone()
             cursor.close()
             return int(row[0]) if row else 0
@@ -88,5 +106,19 @@ class MemoryUsageStore:
         return sum(1 for entry in self.records
                    if entry.usage_day == usage_day and entry.status != "over_limit")
 
+    def count_for_user(self, usage_day, user_id, purposes):
+        purposes = _purposes(purposes)
+        return sum(1 for entry in self.records
+                   if entry.usage_day == usage_day and entry.status != "over_limit"
+                   and entry.user_id == user_id and entry.purpose in purposes)
+
     def record(self, entry):
         self.records.append(entry)
+
+
+def _purposes(purposes):
+    """``purposes`` as a non-empty tuple: SQL has no empty IN ()."""
+    purposes = tuple(purposes)
+    if not purposes:
+        raise ValueError("purposes must name at least one purpose")
+    return purposes

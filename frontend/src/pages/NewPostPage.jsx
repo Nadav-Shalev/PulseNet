@@ -10,10 +10,13 @@ import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 import Autocomplete from '@mui/material/Autocomplete';
 import Chip from '@mui/material/Chip';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import SpellcheckIcon from '@mui/icons-material/Spellcheck';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { UserContext } from '../context/UserContext';
-import { createArticle, searchTags, uploadImage } from '../api/api';
+import { aiCorrect, aiSuggestPost, createArticle, searchTags, uploadImage } from '../api/api';
+import { AiSuggestion, useAiAssist } from '../components/AiSuggestion';
 
 // WYSIWYG toolbar — covers the required bold / italic / hyperlink plus a few extras.
 const QUILL_MODULES = {
@@ -42,6 +45,7 @@ export default function NewPostPage() {
   const { currentUser, authReady } = useContext(UserContext);
   const navigate = useNavigate();
   const debounceRef = useRef(null);
+  const ai = useAiAssist();
 
   useEffect(() => {
     if (authReady && !currentUser) navigate('/login');
@@ -147,6 +151,30 @@ export default function NewPostPage() {
                 placeholder="Write your post content here..."
               />
             </Box>
+            {/* AI help: the result is a suggestion to apply or dismiss, never written in directly. */}
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<SpellcheckIcon />}
+                onClick={() => ai.run(() => aiCorrect(body, 'html'), { html: true, onApply: setBody })}
+                disabled={success || ai.busy || isEmptyHtml(body)}
+                data-testid="ai-correct-post"
+              >
+                Fix grammar
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<AutoAwesomeIcon />}
+                onClick={() => ai.run(() => aiSuggestPost(title.trim(), tags), { html: true, onApply: setBody })}
+                disabled={success || ai.busy || !title.trim()}
+                data-testid="ai-suggest-post"
+              >
+                Draft from title
+              </Button>
+            </Box>
+            <AiSuggestion assist={ai} />
           </Box>
 
           <Autocomplete

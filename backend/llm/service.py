@@ -70,6 +70,19 @@ class LLMService:
         """(calls today, daily limit). LLMError if the usage log cannot be read."""
         return self._count(self._today()), self.daily_limit
 
+    def user_usage_today(self, user_id, purposes):
+        """The calls made today for ``user_id`` with one of ``purposes``, for a
+        caller that limits each user (this service only holds the daily total).
+        LLMError if the usage log cannot be read: the caller refuses rather than
+        guess, as complete() does."""
+        # bool is an int in Python: True would count user 1.
+        if isinstance(user_id, bool) or not isinstance(user_id, int):
+            raise ValueError("user_id must be an int")
+        purposes = tuple(purposes)
+        if not purposes:
+            raise ValueError("purposes must name at least one purpose")
+        return self._read(self.store.count_for_user, self._today(), user_id, purposes)
+
     def complete(self, prompt, *, system=None, purpose, user_id=None):
         """The reply to ``prompt``, stripped, or an LLMError.
 
@@ -105,8 +118,12 @@ class LLMService:
         return self._now().date()
 
     def _count(self, day):
+        return self._read(self.store.count, day)
+
+    def _read(self, query, *args):
+        """``query(*args)`` on the usage log; any failure is an LLMError."""
         try:
-            return self.store.count(day)
+            return query(*args)
         except Exception as exc:
             log.warning("llm usage count failed (%s)", _describe_failure(exc))
             raise LLMError("the LLM usage log is unavailable") from None

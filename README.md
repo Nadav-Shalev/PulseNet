@@ -76,7 +76,9 @@ The AI features go through one LLM service (`backend/llm/`). `.env.example` sets
 to the offline `fake` provider. For a real model, such as free Gemini, see "LLM
 Service" in [backend/README.md](backend/README.md). Posts and comments are checked
 for toxic content before they are stored, by the LLM or, when it is off, by a word
-list ("Moderation" in the same file).
+list ("Moderation" in the same file). The post editor and the comment box offer AI
+help (fix grammar, draft a post from its title, propose a comment) as suggestions
+to apply ("AI Assist").
 
 Start the API:
 

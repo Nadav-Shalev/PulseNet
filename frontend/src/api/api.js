@@ -201,6 +201,42 @@ export const createArticle = async (title, bodyHtml, tags = [], mainImage = '') 
   return data;
 };
 
+// POST `body` as JSON; resolves to the JSON reply. A failure throws an Error with
+// the backend's message and the HTTP `status`.
+const postJson = async (route, body) => {
+  const res = await fetch(`${BASE}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    ...CREDS,
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+// AI assistance: suggestions only, nothing is stored. Each one throws on 401, 429
+// (the user's or the site's daily AI limit, or a busy AI service) and 503 (AI off
+// or failing), with a message meant for the user.
+
+// Correct a draft's spelling and grammar: `format` 'html' for the post editor,
+// 'text' for a comment. Resolves to the corrected draft (HTML is sanitized).
+export const aiCorrect = (text, format = 'text') =>
+  postJson('/ai/correct', { text, format }).then((data) => data.text);
+
+// Draft a post body from its title and tags. Resolves to sanitized HTML.
+export const aiSuggestPost = (title, tags = []) =>
+  postJson('/ai/suggest-post', { title, tags }).then((data) => data.body_html);
+
+// Propose a comment on a post, or a reply to its comment `parentId`, from what
+// they say (the backend reads them). Resolves to plain text.
+export const aiSuggestComment = (postId, parentId = null) =>
+  postJson('/ai/suggest-comment', { post_id: postId, parent_id: parentId }).then((data) => data.text);
+
 // Upload an image file to local backend storage; returns { url }. Used by the
 // post editor (cover image) and the Edit Profile page (avatar).
 export const uploadImage = async (file) => {

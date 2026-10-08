@@ -57,6 +57,9 @@ class BrokenStore:
             raise self.Down("Can't connect to MySQL server on 'db.internal' as dbuser")
         return self.used
 
+    def count_for_user(self, usage_day, user_id, purposes):
+        return self.count(usage_day)
+
     def record(self, entry):
         if "record" in self.fail:
             raise self.Down("Can't connect to MySQL server on 'db.internal' as dbuser")
@@ -218,6 +221,49 @@ class UsageLogDownTests(unittest.TestCase):
         with self.assertLogs("pulsenet.llm", "WARNING"):
             with self.assertRaisesRegex(LLMError, "the LLM usage log is unavailable"):
                 svc.usage_today()
+
+    def test_user_usage_today_fails_the_same_way(self):
+        svc = service(store=BrokenStore(fail=("count",)))
+        with self.assertLogs("pulsenet.llm", "WARNING") as logs:
+            with self.assertRaisesRegex(LLMError, "the LLM usage log is unavailable"):
+                svc.user_usage_today(42, ["ai_correct"])
+        self.assertEqual(logs.output, ["WARNING:pulsenet.llm:llm usage count failed (Down 2003)"])
+
+
+class UserUsageTests(unittest.TestCase):
+    def record(self, store, user_id, purpose, status="ok", day=TODAY):
+        store.record(UsageRecord(day, "scripted", "scripted-1", purpose, user_id, status, 10, 5, 5))
+
+    def test_counts_one_users_calls_today_for_the_given_purposes(self):
+        store = MemoryUsageStore()
+        self.record(store, 42, "ai_correct")
+        self.record(store, 42, "ai_suggest_post", status="timeout")       # failed calls count
+        self.record(store, 42, "ai_correct", status="over_limit")         # refused ones do not
+        self.record(store, 42, "moderation")                              # another purpose
+        self.record(store, 7, "ai_correct")                               # another user
+        self.record(store, 42, "ai_correct", day=TODAY - timedelta(days=1))
+        svc = service(store=store)
+
+        self.assertEqual(svc.user_usage_today(42, ("ai_correct", "ai_suggest_post")), 2)
+        self.assertEqual(svc.user_usage_today(42, ["moderation"]), 1)
+        self.assertEqual(svc.user_usage_today(99, ["ai_correct"]), 0)
+
+    def test_the_day_is_the_services_utc_day(self):
+        store = MemoryUsageStore()
+        self.record(store, 42, "ai_correct", day=date(2026, 10, 9))
+        late = service(store=store, now=datetime(2026, 10, 8, 23, 59, tzinfo=timezone.utc))
+        next_day = service(store=store, now=datetime(2026, 10, 9, 0, 0, tzinfo=timezone.utc))
+
+        self.assertEqual(late.user_usage_today(42, ["ai_correct"]), 0)
+        self.assertEqual(next_day.user_usage_today(42, ["ai_correct"]), 1)
+
+    def test_bad_arguments_are_a_bug_in_the_caller(self):
+        svc = service()
+        for user_id, purposes in ((True, ["ai_correct"]), ("42", ["ai_correct"]), (None, ["ai_correct"]),
+                                  (42, []), (42, ())):
+            with self.subTest(user_id=user_id, purposes=purposes):
+                with self.assertRaises(ValueError):
+                    svc.user_usage_today(user_id, purposes)
 
     def test_a_reply_is_kept_when_its_row_cannot_be_written(self):
         svc = service("worth keeping", store=BrokenStore(fail=("record",)))

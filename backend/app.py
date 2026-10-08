@@ -30,6 +30,7 @@ from PIL import Image, UnidentifiedImageError
 from werkzeug.utils import secure_filename
 from mock_data import mock_get_articles, mock_get_article_by_id, mock_search_users
 
+import ai_assist
 import llm
 import moderation
 
@@ -765,6 +766,29 @@ def get_article(article_id):
 
 # ─── POST /api/articles ───────────────────────────────────────────────────────
 
+MAX_TITLE_CHARS = 150   # posts.title VARCHAR(150)
+MAX_TAGS = 10
+MAX_TAG_CHARS = 100     # tags.name VARCHAR(100)
+
+
+def _clean_tags(tags):
+    """The request's ``tags`` as trimmed names, blanks dropped (missing or empty is
+    no tags). InputError (a 400) unless it is a list of at most MAX_TAGS strings
+    that each fit tags.name, so a bad tag never fails halfway through an INSERT."""
+    if not tags:
+        return []
+    if not isinstance(tags, list):
+        raise InputError("tags must be a list")
+    if len(tags) > MAX_TAGS:
+        raise InputError(f"You can add at most {MAX_TAGS} tags")
+    if any(not isinstance(tag, str) for tag in tags):
+        raise InputError("Each tag must be a string")
+    tags = [tag for tag in (t.strip() for t in tags) if tag]
+    if any(len(tag) > MAX_TAG_CHARS for tag in tags):
+        raise InputError(f"Tags must be {MAX_TAG_CHARS} characters or fewer")
+    return tags
+
+
 @app.route("/api/articles", methods=["POST"])
 @require_session
 def create_article():
@@ -776,7 +800,7 @@ def create_article():
     title    = _str_field(article, "title")
     raw_html = _str_field(article, "body_html", strip=False)
     body_md  = _str_field(article, "body_markdown")
-    tags     = article.get("tags") or []
+    tags     = article.get("tags")
     cover    = _str_field(article, "main_image") or None
 
     if not title:
@@ -798,23 +822,11 @@ def create_article():
     else:
         return jsonify({"error": "Post body is required"}), 400
 
-    if len(title) > 150:
-        return jsonify({"error": "Title must be 150 characters or fewer"}), 400
+    if len(title) > MAX_TITLE_CHARS:
+        return jsonify({"error": f"Title must be {MAX_TITLE_CHARS} characters or fewer"}), 400
 
-    if not isinstance(tags, list):
-        return jsonify({"error": "tags must be a list"}), 400
-
-    if len(tags) > 10:
-        return jsonify({"error": "You can add at most 10 tags"}), 400
-
-    # Validate every tag before the post is inserted, so a bad one is a 400 and
-    # not a crash halfway through. Blanks are skipped; the trimmed name must fit
-    # tags.name VARCHAR(100).
-    if any(not isinstance(tag, str) for tag in tags):
-        return jsonify({"error": "Each tag must be a string"}), 400
-    tags = [tag for tag in (t.strip() for t in tags) if tag]
-    if any(len(tag) > 100 for tag in tags):
-        return jsonify({"error": "Tags must be 100 characters or fewer"}), 400
+    # Every tag is validated before the post is inserted.
+    tags = _clean_tags(tags)
 
     # Author is derived from the session, not from the request body.
     user = g.current_user
@@ -1176,6 +1188,163 @@ def delete_comment(comment_id):
     cursor.close()
     conn.close()
     return jsonify({"deleted": True, "id": comment_id, "comment_count": comment_count})
+
+
+# ─── AI assistance: correct a draft, draft a post, propose a comment ──────────
+# Suggestions only: nothing is stored, and whatever the user publishes from them
+# goes through moderation like anything else. The prompts live in ai_assist.py.
+
+AI_USER_DAILY_LIMIT = ai_assist.user_daily_limit(os.environ)
+
+
+def _ai_error(exc):
+    """The response for an LLMError, worded for the person waiting on it."""
+    if isinstance(exc, llm.LLMRateLimited):
+        resp = make_response(jsonify({"error": "The AI service is busy right now. Try again in a minute."}), 429)
+        if exc.retry_after:
+            resp.headers["Retry-After"] = str(exc.retry_after)
+        return resp
+    if isinstance(exc, llm.LLMLimitReached):
+        return jsonify({"error": "PulseNet has used up today's AI quota. Try again tomorrow."}), 429
+    if isinstance(exc, llm.LLMTimeout):
+        return jsonify({"error": "The AI service took too long to answer. Try again."}), 503
+    return jsonify({"error": "AI assistance is unavailable right now. Try again later."}), 503
+
+
+def _ask_ai(purpose, prompt, system):
+    """``(reply, None)``, or ``(None, error response)``: AI assistance is off, the
+    session user has used today's AI_USER_DAILY_LIMIT requests, or the LLM failed."""
+    if llm_service is None:
+        return None, (jsonify({"error": "AI assistance is turned off on this server."}), 503)
+    user_id = g.current_user["id"]
+    try:
+        # Soft, like the daily limit: the count is read before the call.
+        if llm_service.user_usage_today(user_id, ai_assist.PURPOSES) >= AI_USER_DAILY_LIMIT:
+            return None, (jsonify({
+                "error": f"You have used today's {AI_USER_DAILY_LIMIT} AI requests. "
+                         "They renew at midnight UTC.",
+            }), 429)
+        return llm_service.complete(prompt, system=system, purpose=purpose, user_id=user_id), None
+    except llm.LLMError as exc:
+        return None, _ai_error(exc)
+
+
+def _empty_suggestion():
+    return _ai_error(llm.LLMBadReply("the suggestion is empty"))
+
+
+@app.route("/api/ai/correct", methods=["POST"])
+@require_session
+def ai_correct():
+    """Correct a draft's spelling and grammar: the post editor's HTML
+    (``"format": "html"``) or a comment's plain text (``"text"``, the default)."""
+    data = _json_object(request.get_json())
+    text = _str_field(data, "text", strip=False)
+    fmt  = _str_field(data, "format") or "text"
+    if fmt not in ai_assist.FORMATS:
+        return jsonify({"error": "format must be text or html"}), 400
+    if len(text) > ai_assist.MAX_INPUT_CHARS:
+        return jsonify({"error": f"AI correction takes up to {ai_assist.MAX_INPUT_CHARS} characters"}), 400
+    if fmt == "html":
+        text = sanitize_html(text)       # the model sees what would be stored, nothing more
+    if not (html_to_text(text) if fmt == "html" else text.strip()):
+        return jsonify({"error": "There is no text to correct"}), 400
+
+    reply, err = _ask_ai("ai_correct", *ai_assist.correct_request(text, fmt))
+    if err:
+        return err
+    corrected = ai_assist.clean_reply(reply, "draft")
+    if fmt == "html":
+        # Model output is untrusted HTML: sanitized like anything a user submits.
+        corrected = sanitize_html(corrected)
+    if not (html_to_text(corrected) if fmt == "html" else corrected.strip()):
+        return _empty_suggestion()
+    return jsonify({"text": corrected})
+
+
+@app.route("/api/ai/suggest-post", methods=["POST"])
+@require_session
+def ai_suggest_post():
+    """Draft a post body from its title (and tags), as sanitized HTML for the editor."""
+    data  = _json_object(request.get_json())
+    title = _str_field(data, "title")
+    tags  = _clean_tags(data.get("tags"))
+    if not title:
+        return jsonify({"error": "Write a title first: the draft is written from it"}), 400
+    if len(title) > MAX_TITLE_CHARS:
+        return jsonify({"error": f"Title must be {MAX_TITLE_CHARS} characters or fewer"}), 400
+
+    reply, err = _ask_ai("ai_suggest_post", *ai_assist.suggest_post_request(title, tags))
+    if err:
+        return err
+    # The model writes Markdown; the HTML is sanitized like a markdown post's.
+    body_html = sanitize_html(to_html(ai_assist.clean_reply(reply)))
+    if not html_to_text(body_html):
+        return _empty_suggestion()
+    return jsonify({"body_html": body_html})
+
+
+def _is_id(value):
+    # bool is an int in Python: true must not mean id 1.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _suggestion_context(post_id, parent_id):
+    """``((title, post text, parent), None)`` for proposing a comment, read from the
+    DB and never taken from the request (``parent`` is (username, text) or None);
+    else ``(None, error response)``."""
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT title, body, body_html FROM posts WHERE id = %s", (post_id,))
+        post = cursor.fetchone()
+        if not post:
+            return None, (jsonify({"error": "Post not found"}), 404)
+        parent = None
+        if parent_id is not None:
+            cursor.execute(
+                "SELECT c.post_id, c.body_html, u.username FROM comments c "
+                "JOIN users u ON u.id = c.author_id WHERE c.id = %s",
+                (parent_id,),
+            )
+            row = cursor.fetchone()
+            if row is None or row["post_id"] != post_id:
+                return None, (jsonify({"error": "parent_id must be a comment on this post"}), 400)
+            parent = (row["username"], html_to_text(row["body_html"] or ""))
+        text = html_to_text(post["body_html"]) if post.get("body_html") else (post.get("body") or "")
+        return (post["title"], text, parent), None
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/ai/suggest-comment", methods=["POST"])
+@require_session
+def ai_suggest_comment():
+    """Propose a comment on a post, or a reply to one of its comments, from what
+    they say. Plain text, for the comment box."""
+    data      = _json_object(request.get_json())
+    post_id   = data.get("post_id")
+    parent_id = data.get("parent_id")
+    if not _is_id(post_id):
+        return jsonify({"error": "post_id must be a post id"}), 400
+    if parent_id is not None and not _is_id(parent_id):
+        return jsonify({"error": "parent_id must be a comment id"}), 400
+    try:
+        context, err = _suggestion_context(post_id, parent_id)
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+    if err:
+        return err
+
+    # The DB connection is closed before the LLM call, which can take seconds.
+    reply, err = _ask_ai("ai_suggest_comment", *ai_assist.suggest_comment_request(*context))
+    if err:
+        return err
+    text = ai_assist.clean_reply(reply, unquote=True)[:MAX_COMMENT_CHARS].strip()
+    if not text:
+        return _empty_suggestion()
+    return jsonify({"text": text})
 
 
 # ─── Image upload (local storage, no external services) ────────────────────────
