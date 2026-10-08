@@ -124,6 +124,9 @@ async function main() {
       ...process.env,
       DB_NAME: E2E_DB, // wins over backend/.env: load_dotenv never overrides real env vars
       LLM_PROVIDER: 'fake', // backend/llm answers offline and the same way every time: no key, no quota
+      // Moderation asks the LLM about every post and comment the specs create (the
+      // fake's echo is never cached), so the default 100 calls a day is too tight.
+      LLM_DAILY_LIMIT: '1000',
       MAIL_PROVIDER: 'file', // mails written to disk, never sent (mail service, later sessions)
       PYTHONUNBUFFERED: '1',
     },

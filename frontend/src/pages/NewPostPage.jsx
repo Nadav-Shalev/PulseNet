@@ -117,7 +117,7 @@ export default function NewPostPage() {
             </Alert>
           )}
           {error && (
-            <Alert severity="error" onClose={() => setError('')}>
+            <Alert severity="error" onClose={() => setError('')} data-testid="post-error">
               {error}
             </Alert>
           )}
@@ -129,6 +129,7 @@ export default function NewPostPage() {
             onChange={e => setTitle(e.target.value)}
             disabled={success}
             fullWidth
+            slotProps={{ htmlInput: { 'data-testid': 'post-title-input' } }}
           />
 
           <Box>
@@ -217,6 +218,7 @@ export default function NewPostPage() {
             variant="contained"
             onClick={handlePublish}
             disabled={loading || success}
+            data-testid="post-publish"
             startIcon={loading ? <CircularProgress size={18} color="inherit" /> : null}
           >
             {loading ? 'Publishing...' : 'Publish'}

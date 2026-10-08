@@ -74,7 +74,9 @@ See [database/README.md](database/README.md) for how migrations work.
 
 The AI features go through one LLM service (`backend/llm/`). `.env.example` sets it
 to the offline `fake` provider. For a real model, such as free Gemini, see "LLM
-Service" in [backend/README.md](backend/README.md).
+Service" in [backend/README.md](backend/README.md). Posts and comments are checked
+for toxic content before they are stored, by the LLM or, when it is off, by a word
+list ("Moderation" in the same file).
 
 Start the API:
 
