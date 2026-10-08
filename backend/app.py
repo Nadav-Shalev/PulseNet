@@ -285,7 +285,8 @@ SESSION_MAX_AGE_SECONDS = SESSION_DURATION_DAYS * 24 * 60 * 60  # 604800
 def _user_shape(row):
     """The logged-in user's own record (/api/me, login, signup). It is the only
     JSON that carries an email, so never use it for another user's data. Must
-    NEVER include password_hash."""
+    NEVER include password_hash. ``role`` only tells the UI whether to show the
+    admin page: every admin endpoint checks the role again on the server."""
     return {
         "id":            row["id"],
         "name":          row.get("name"),
@@ -294,6 +295,7 @@ def _user_shape(row):
         "bio":           row.get("bio"),
         "avatar":        row.get("avatar"),
         "profile_image": row.get("profile_image"),
+        "role":          row.get("role") or "user",
     }
 
 
@@ -397,7 +399,8 @@ def _clear_session_cookie(resp):
 def require_session(view):
     """Gate write endpoints. Looks up the cookie's session_id and stashes the
     matching user (with their role) on ``g.current_user``; 401 if
-    missing/expired/invalid."""
+    missing/expired/invalid, or if the user is banned (a ban deletes their
+    sessions too; the filter is the second lock)."""
     @wraps(view)
     def wrapped(*args, **kwargs):
         sid = request.cookies.get(SESSION_COOKIE_NAME)
@@ -414,7 +417,7 @@ def require_session(view):
                        u.avatar, u.profile_image, u.role
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
-                WHERE s.session_id = %s AND s.expires_at > NOW()
+                WHERE s.session_id = %s AND s.expires_at > NOW() AND NOT u.is_banned
                 """,
                 (sid,),
             )
@@ -461,7 +464,7 @@ def _current_user_from_cookie():
         cursor.execute(
             "SELECT u.id, u.username FROM sessions s "
             "JOIN users u ON u.id = s.user_id "
-            "WHERE s.session_id = %s AND s.expires_at > NOW()",
+            "WHERE s.session_id = %s AND s.expires_at > NOW() AND NOT u.is_banned",
             (sid,),
         )
         user = cursor.fetchone()
@@ -890,13 +893,14 @@ def create_article():
 
 # ─── Owner-only post management (delete post, remove a tag) ─────────────────────
 
-def _require_post_owner(cursor, post_id, user_id):
-    """Return None if user_id owns post_id, else a (response, status) tuple."""
+def _require_post_owner(cursor, post_id, user_id, admin_ok=False):
+    """Return None if user_id owns post_id (or ``admin_ok`` and the post exists),
+    else a (response, status) tuple."""
     cursor.execute("SELECT author_id FROM posts WHERE id = %s", (post_id,))
     row = cursor.fetchone()
     if row is None:
         return jsonify({"error": "Post not found"}), 404
-    if row[0] != user_id:
+    if row[0] != user_id and not admin_ok:
         return jsonify({"error": "You can only manage your own posts"}), 403
     return None
 
@@ -904,9 +908,12 @@ def _require_post_owner(cursor, post_id, user_id):
 @app.route("/api/articles/<int:post_id>", methods=["DELETE"])
 @require_session
 def delete_article(post_id):
+    """Its author, or an admin (moderation), may delete a post. Its likes, comments
+    and reports go with it (ON DELETE CASCADE)."""
+    me     = g.current_user
     conn   = get_db_connection()
     cursor = conn.cursor()
-    err = _require_post_owner(cursor, post_id, g.current_user["id"])
+    err = _require_post_owner(cursor, post_id, me["id"], admin_ok=me.get("role") == "admin")
     if err:
         cursor.close()
         conn.close()
@@ -1078,14 +1085,14 @@ def _check_comment_target(cursor, post_id, parent_id):
     return None
 
 
-def _require_comment_owner(cursor, comment_id, user_id):
-    """``(comment row, None)`` when user_id wrote comment_id, else ``(None, error
-    response)``. ``cursor`` is a dictionary cursor."""
+def _require_comment_owner(cursor, comment_id, user_id, admin_ok=False):
+    """``(comment row, None)`` when user_id wrote comment_id (or ``admin_ok`` and it
+    exists), else ``(None, error response)``. ``cursor`` is a dictionary cursor."""
     cursor.execute("SELECT author_id, post_id FROM comments WHERE id = %s", (comment_id,))
     comment = cursor.fetchone()
     if comment is None:
         return None, (jsonify({"error": "Comment not found"}), 404)
-    if comment["author_id"] != user_id:
+    if comment["author_id"] != user_id and not admin_ok:
         return None, (jsonify({"error": "You can only delete your own comments"}), 403)
     return comment, None
 
@@ -1174,9 +1181,12 @@ def delete_comment(comment_id):
     if not is_db_available():
         return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
 
+    # Its writer, or an admin (moderation).
+    me     = g.current_user
     conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    comment, err = _require_comment_owner(cursor, comment_id, g.current_user["id"])
+    comment, err = _require_comment_owner(cursor, comment_id, me["id"],
+                                          admin_ok=me.get("role") == "admin")
     if err:
         cursor.close()
         conn.close()
@@ -1188,6 +1198,271 @@ def delete_comment(comment_id):
     cursor.close()
     conn.close()
     return jsonify({"deleted": True, "id": comment_id, "comment_count": comment_count})
+
+
+# ─── Reports: a user flags a post or a comment for the admins ─────────────────
+
+REPORT_REASONS = ("spam", "harassment", "hate", "misinformation", "other")
+MAX_REPORT_DETAILS = 500      # reports.details VARCHAR(500)
+DUPLICATE_KEY = 1062          # MySQL ER_DUP_ENTRY
+# The fixed SQL per target kind (never built from the request).
+_REPORT_TARGETS = {
+    "post_id":    ("post", "SELECT author_id FROM posts WHERE id = %s",
+                   "INSERT INTO reports (reporter_id, post_id, reason, details) VALUES (%s, %s, %s, %s)"),
+    "comment_id": ("comment", "SELECT author_id FROM comments WHERE id = %s",
+                   "INSERT INTO reports (reporter_id, comment_id, reason, details) VALUES (%s, %s, %s, %s)"),
+}
+
+
+@app.route("/api/reports", methods=["POST"])
+@require_session
+def create_report():
+    """Report one post or one comment: ``{post_id | comment_id, reason, details?}``.
+    One report per user and target: a second one is answered as already reported."""
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    data = _json_object(request.get_json())
+    given = [key for key in _REPORT_TARGETS if data.get(key) is not None]
+    if len(given) != 1:
+        return jsonify({"error": "Report exactly one of post_id or comment_id"}), 400
+    key = given[0]
+    target_id = data[key]
+    if not _is_id(target_id):
+        return jsonify({"error": f"{key} must be an id"}), 400
+    reason = _str_field(data, "reason")
+    if reason not in REPORT_REASONS:
+        return jsonify({"error": f"reason must be one of: {', '.join(REPORT_REASONS)}"}), 400
+    details = _str_field(data, "details")
+    if len(details) > MAX_REPORT_DETAILS:
+        return jsonify({"error": f"details must be {MAX_REPORT_DETAILS} characters or fewer"}), 400
+
+    kind, select_sql, insert_sql = _REPORT_TARGETS[key]
+    me     = g.current_user
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(select_sql, (target_id,))
+        target = cursor.fetchone()
+        if target is None:
+            return jsonify({"error": f"{kind.capitalize()} not found"}), 404
+        if target["author_id"] == me["id"]:
+            return jsonify({"error": f"You cannot report your own {kind}"}), 400
+        # The reporter is the session user, never an id from the request body.
+        try:
+            cursor.execute(insert_sql, (me["id"], target_id, reason, details or None))
+            conn.commit()
+        except mysql.connector.IntegrityError as exc:
+            # Only the unique keys (one report per user and target) mean "already
+            # reported". Any other error (a target deleted meanwhile: 1452) is a real
+            # failure and goes up as one.
+            if exc.errno != DUPLICATE_KEY:
+                raise
+            conn.rollback()
+            return jsonify({"reported": True, "already": True})
+        return jsonify({"reported": True, "already": False, "id": cursor.lastrowid}), 201
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# ─── Admin: the reports list ──────────────────────────────────────────────────
+
+REPORT_STATUSES = ("open", "resolved")
+ADMIN_REPORT_LIMIT = 100
+REPORT_EXCERPT_CHARS = 200
+
+# A report with its target (the post, or the comment and its post), the target's
+# author, the reporter and the admin who resolved it. The body is cut in SQL so a
+# long post is not read whole; html_to_text copes with a tag cut in half.
+_REPORT_SELECT = """
+    SELECT r.id, r.post_id, r.comment_id, r.reason, r.details, r.status,
+           r.created_at, r.resolved_at,
+           reporter.username AS reporter_username,
+           resolver.username AS resolved_by_username,
+           p.id AS target_post_id, p.title AS post_title,
+           LEFT(COALESCE(c.body_html, p.body_html, p.body), 3000) AS target_html,
+           author.id AS author_id, author.username AS author_username,
+           author.is_banned AS author_is_banned
+    FROM reports r
+    JOIN users reporter ON reporter.id = r.reporter_id
+    LEFT JOIN users resolver ON resolver.id = r.resolved_by
+    LEFT JOIN comments c ON c.id = r.comment_id
+    JOIN posts p ON p.id = COALESCE(r.post_id, c.post_id)
+    JOIN users author ON author.id = COALESCE(c.author_id, p.author_id)
+"""
+
+
+def _excerpt(text, limit=REPORT_EXCERPT_CHARS):
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def _shape_report(row):
+    """A report as the admin page shows it. No email; ``details`` is the reporter's
+    plain text, which the UI shows as text, never as HTML."""
+    kind = "post" if row.get("post_id") is not None else "comment"
+    return {
+        "id":          row["id"],
+        "reason":      row["reason"],
+        "details":     row.get("details"),
+        "status":      row["status"],
+        "created_at":  _iso(row.get("created_at")),
+        "resolved_at": _iso(row.get("resolved_at")),
+        "resolved_by": row.get("resolved_by_username"),
+        "reporter":    {"username": row.get("reporter_username")},
+        "target": {
+            "type":       kind,
+            "id":         row["post_id"] if kind == "post" else row["comment_id"],
+            "post_id":    row.get("target_post_id"),
+            "post_title": row.get("post_title"),
+            "excerpt":    _excerpt(html_to_text(row.get("target_html") or "")),
+        },
+        "author": {
+            "id":        row.get("author_id"),
+            "username":  row.get("author_username"),
+            "is_banned": bool(row.get("author_is_banned")),
+        },
+    }
+
+
+@app.route("/api/admin/reports")
+@require_admin
+def admin_list_reports():
+    """The newest ADMIN_REPORT_LIMIT reports with ``status`` (default open)."""
+    status = request.args.get("status", "open")
+    if status not in REPORT_STATUSES:
+        return jsonify({"error": "status must be open or resolved"}), 400
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            _REPORT_SELECT + "WHERE r.status = %s ORDER BY r.created_at DESC, r.id DESC LIMIT %s",
+            (status, ADMIN_REPORT_LIMIT),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+    return jsonify([_shape_report(row) for row in rows])
+
+
+@app.route("/api/admin/reports/<int:report_id>/resolve", methods=["POST"])
+@require_admin
+def resolve_report(report_id):
+    """Dismiss a report: the content stays. Resolving twice keeps the first admin
+    and time. (Deleting the content instead removes its reports: CASCADE.)"""
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT status FROM reports WHERE id = %s", (report_id,))
+    report = cursor.fetchone()
+    if report is None:
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "Report not found"}), 404
+    if report["status"] == "open":
+        cursor.execute(
+            "UPDATE reports SET status = 'resolved', resolved_by = %s, resolved_at = NOW() "
+            "WHERE id = %s AND status = 'open'",
+            (g.current_user["id"], report_id),
+        )
+        conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({"id": report_id, "status": "resolved"})
+
+
+# ─── Admin: users (find, ban, unban) ──────────────────────────────────────────
+# A ban only shuts the account out (login and every session); the user's posts and
+# comments stay until an admin deletes them, and reports about them stay open.
+
+ADMIN_USER_LIMIT = 20
+
+
+def _admin_user_shape(row):
+    """A user as the admin page lists it: no email, like every other user list."""
+    return {
+        "id":        row["id"],
+        "username":  row["username"],
+        "name":      row.get("name"),
+        "role":      row.get("role") or "user",
+        "is_banned": bool(row.get("is_banned")),
+    }
+
+
+@app.route("/api/admin/users")
+@require_admin
+def admin_list_users():
+    """Up to ADMIN_USER_LIMIT users by username: those matching ``q`` (username or
+    name, never email), or only the banned ones with ``banned=1``."""
+    q = (request.args.get("q") or "").strip()
+    banned_only = request.args.get("banned") == "1"
+    # The conditions are fixed strings; only the values come from the request.
+    where, params = [], []
+    if q:
+        where.append("(username LIKE %s OR name LIKE %s)")
+        params += [f"%{q}%"] * 2
+    if banned_only:
+        where.append("is_banned")
+    sql = "SELECT id, username, name, role, is_banned FROM users"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(sql + " ORDER BY username LIMIT %s", params + [ADMIN_USER_LIMIT])
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+    return jsonify([_admin_user_shape(row) for row in rows])
+
+
+def _set_banned(user_id, banned):
+    """Shared body of ban / unban. A ban also deletes every session of the user, in
+    the same transaction, so they are logged out everywhere at once."""
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+    if banned and user_id == g.current_user["id"]:
+        return jsonify({"error": "You cannot ban yourself"}), 400
+
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id, username, name, role, is_banned FROM users WHERE id = %s", (user_id,))
+    user = cursor.fetchone()
+    if user is None:
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+    # One admin cannot lock another out; a role change is a job for manage.py.
+    if banned and user.get("role") == "admin":
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "An admin cannot be banned"}), 403
+
+    cursor.execute("UPDATE users SET is_banned = %s WHERE id = %s", (banned, user_id))
+    if banned:
+        cursor.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify(_admin_user_shape({**user, "is_banned": banned}))
+
+
+@app.route("/api/admin/users/<int:user_id>/ban", methods=["POST"])
+@require_admin
+def ban_user(user_id):
+    return _set_banned(user_id, True)
+
+
+@app.route("/api/admin/users/<int:user_id>/ban", methods=["DELETE"])
+@require_admin
+def unban_user(user_id):
+    return _set_banned(user_id, False)
 
 
 # ─── AI assistance: correct a draft, draft a post, propose a comment ──────────
@@ -1473,6 +1748,7 @@ def create_user():
         "bio":           bio,
         "avatar":        avatar,
         "profile_image": avatar,
+        "role":          "user",          # the column default: signup never sets a role
     }
     resp = make_response(jsonify(user_payload), 201)
     return _set_session_cookie(resp, session_id)
@@ -1494,8 +1770,8 @@ def login():
     conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
-        "SELECT id, name, username, email, bio, avatar, profile_image, password_hash "
-        "FROM users WHERE email = %s",
+        "SELECT id, name, username, email, bio, avatar, profile_image, role, is_banned, "
+        "password_hash FROM users WHERE email = %s",
         (email,),
     )
     user = cursor.fetchone()
@@ -1510,6 +1786,12 @@ def login():
         cursor.close()
         conn.close()
         return jsonify({"error": "Invalid email or password"}), 401
+
+    # After the password check, so only the account's owner learns it is banned.
+    if user.get("is_banned"):
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "This account has been suspended"}), 403
 
     session_id = _create_session(cursor, user["id"])
     conn.commit()

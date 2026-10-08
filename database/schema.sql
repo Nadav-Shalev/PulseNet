@@ -122,3 +122,29 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     INDEX idx_llm_usage_user (user_id, usage_day),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
+
+-- A user's report of a post or a comment (migration 005), for the admin page.
+-- Exactly one of post_id / comment_id is set (chk_reports_one_target). One report
+-- per user and target (the unique keys: NULLs never collide, so each key only binds
+-- its own target). Status 'open' until an admin dismisses it; banning the author
+-- leaves it open, and deleting the content deletes the report (CASCADE).
+CREATE TABLE IF NOT EXISTS reports (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    reporter_id INT NOT NULL,
+    post_id     INT,
+    comment_id  INT,
+    reason      ENUM('spam', 'harassment', 'hate', 'misinformation', 'other') NOT NULL,
+    details     VARCHAR(500),
+    status      ENUM('open', 'resolved') NOT NULL DEFAULT 'open',
+    resolved_by INT,
+    resolved_at TIMESTAMP NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_reports_post (reporter_id, post_id),
+    UNIQUE KEY uq_reports_comment (reporter_id, comment_id),
+    INDEX idx_reports_status (status, created_at),
+    CONSTRAINT chk_reports_one_target CHECK ((post_id IS NULL) <> (comment_id IS NULL)),
+    FOREIGN KEY (reporter_id) REFERENCES users(id)    ON DELETE CASCADE,
+    FOREIGN KEY (post_id)     REFERENCES posts(id)    ON DELETE CASCADE,
+    FOREIGN KEY (comment_id)  REFERENCES comments(id) ON DELETE CASCADE,
+    FOREIGN KEY (resolved_by) REFERENCES users(id)    ON DELETE SET NULL
+);

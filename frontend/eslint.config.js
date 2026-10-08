@@ -37,4 +37,9 @@ export default defineConfig([
       },
     },
   },
+  {
+    // Runs in Node (setupNodeEvents), not in the browser.
+    files: ['cypress.config.js'],
+    languageOptions: { globals: globals.node },
+  },
 ])

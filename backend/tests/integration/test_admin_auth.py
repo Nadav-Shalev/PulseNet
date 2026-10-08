@@ -1,8 +1,8 @@
 """Roles: the require_admin gate, and that no request can make itself an admin.
 
-No route uses require_admin yet (the admin endpoints come in S11), so the gate is
-tested by wrapping a stand-in view and calling it inside a request context, with
-the DB seam patched like the endpoint tests. Only backend/manage.py make-admin
+The gate is tested by wrapping a stand-in view and calling it inside a request
+context, with the DB seam patched like the endpoint tests (the admin endpoints
+themselves: test_admin_api.py, test_reports_api.py). Only backend/manage.py make-admin
 grants the role: signup and PATCH /api/me must ignore role and the user flags.
 """
 
@@ -118,7 +118,7 @@ class RoleIsNeverSetByARequestTests(unittest.TestCase):
         sql, params = conn.find("update users set")[0]
         self.assertEqual(" ".join(sql.split()), "UPDATE users SET name = %s WHERE id = %s")
         self.assertEqual(params, ["Ada L", 42])
-        self.assertNotIn("role", resp.get_json())
+        self.assertEqual(resp.get_json()["role"], "user")
 
     def test_patch_me_with_only_role_changes_nothing(self):
         conn = FakeConn(fetchone=[_session_user()])
@@ -140,7 +140,7 @@ class RoleIsNeverSetByARequestTests(unittest.TestCase):
         sql, params = conn.find("insert into users")[0]
         self.assertNotIn("role", sql.lower())
         self.assertNotIn("admin", params)
-        self.assertNotIn("role", resp.get_json())
+        self.assertEqual(resp.get_json()["role"], "user")
 
 
 if __name__ == "__main__":

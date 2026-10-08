@@ -11,6 +11,7 @@ import SignupPage from './pages/SignupPage';
 import NewPostPage from './pages/NewPostPage';
 import EditProfilePage from './pages/EditProfilePage';
 import AboutPage from './pages/AboutPage';
+import AdminPage from './pages/AdminPage';
 import { UserProvider } from './context/UserContext';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/new-post" element={<NewPostPage />} />
             <Route path="/edit-profile" element={<EditProfilePage />} />
             <Route path="/about" element={<AboutPage />} />
+            <Route path="/admin" element={<AdminPage />} />
             <Route path="*" element={<HomePage />} />
           </Routes>
         </Box>

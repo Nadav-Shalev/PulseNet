@@ -37,6 +37,12 @@ class UserShapeTests(unittest.TestCase):
         self.assertIsNone(shaped["name"])
         self.assertIsNone(shaped["bio"])
 
+    def test_user_shape_role_defaults_to_user(self):
+        # Fail closed: a row without a role is shown the UI of a regular user.
+        self.assertEqual(app._user_shape({"id": 1, "username": "u", "email": "u@x.com"})["role"], "user")
+        self.assertEqual(app._user_shape({"id": 1, "username": "u", "email": "u@x.com",
+                                          "role": "admin"})["role"], "admin")
+
 
 class HtmlToTextTests(unittest.TestCase):
     def test_strips_tags(self):

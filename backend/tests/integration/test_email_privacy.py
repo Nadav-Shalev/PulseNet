@@ -1,7 +1,8 @@
 """Email privacy: a user's email is visible only to that user.
 
 Public endpoints (feeds, a single post, user search, the user list, profiles,
-follow lists, a newly created post) never put an email in the response. Their SQL
+follow lists, a newly created post) never put an email in the response, and
+neither do the admin lists (users, reports): an admin needs no address either. Their SQL
 neither selects nor filters on the email column, so search results can't be used
 to probe for an address either. Only the caller's own record carries it:
 GET/PATCH /api/me and the login/signup responses.
@@ -11,6 +12,7 @@ import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 TESTS_DIR = HERE.parent
@@ -239,6 +241,38 @@ class OwnRecordKeepsEmailTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["email"], ADA_EMAIL)
+
+
+class AdminResponsesHideEmailTests(unittest.TestCase):
+    """The session lookup reads the admin's own email, so the endpoint gets a
+    connection of its own and only its SQL is checked."""
+
+    def _get(self, url, conn):
+        session = FakeConn(fetchone=[_session_user(role="admin")])
+        with patch.object(app, "get_db_connection", side_effect=[session, conn]):
+            return _authed_client().get(url)
+
+    def assertNoEmail(self, resp, conn):
+        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+        self.assertEqual(_emails_in(resp.get_json()), [])
+        self.assertEqual([sql for sql, _ in conn.executed if "email" in sql.lower()], [])
+
+    def test_admin_user_list(self):
+        for url in ("/api/admin/users", "/api/admin/users?q=ada@example.com", "/api/admin/users?banned=1"):
+            with self.subTest(url=url):
+                conn = FakeConn(fetchall=[[{"id": 42, "username": "ada", "name": "Ada", "role": "user",
+                                            "is_banned": 0, "email": ADA_EMAIL}]])
+                self.assertNoEmail(self._get(url, conn), conn)
+
+    def test_admin_report_list(self):
+        conn = FakeConn(fetchall=[[{
+            "id": 1, "post_id": 1, "comment_id": None, "reason": "spam", "details": None,
+            "status": "open", "created_at": None, "resolved_at": None,
+            "reporter_username": "bob", "resolved_by_username": None, "target_post_id": 1,
+            "post_title": "Hello", "target_html": "<p>hi</p>", "author_id": 42,
+            "author_username": "ada", "author_is_banned": 0, "email": ADA_EMAIL,
+        }]])
+        self.assertNoEmail(self._get("/api/admin/reports", conn), conn)
 
 
 if __name__ == "__main__":

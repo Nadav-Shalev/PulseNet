@@ -74,6 +74,9 @@ class FakeCursor:
     # mysql.connector cursors accept ``execute(sql)`` or ``execute(sql, params)``.
     def execute(self, sql, params=None):
         self._conn.executed.append((sql, params))
+        for needle, error in self._conn.raise_on.items():
+            if needle in _norm(sql):
+                raise error
 
     def executemany(self, sql, seq_params):
         self._conn.executed.append((sql, list(seq_params)))
@@ -113,16 +116,21 @@ class FakeConn:
       * ``fetchall`` — list of lists returned by successive ``fetchall()`` calls
         (``[]`` once exhausted).
       * ``lastrowid`` — value reported after an INSERT.
+      * ``raise_on`` — ``{sql needle: exception}``: a statement whose normalized SQL
+        contains the (lower-case) needle is recorded, then raises the exception,
+        like a duplicate key or a foreign-key error from MySQL.
 
     Then assert on what ran via ``ran()`` / ``find()`` / ``executed``.
     """
 
-    def __init__(self, fetchone=None, fetchall=None, lastrowid=1):
+    def __init__(self, fetchone=None, fetchall=None, lastrowid=1, raise_on=None):
         self.executed = []                       # list[(sql, params)]
+        self.raise_on = dict(raise_on or {})
         self.fetchone_results = deque(fetchone or [])
         self.fetchall_results = deque(fetchall or [])
         self.lastrowid = lastrowid
         self.commits = 0
+        self.rollbacks = 0
         self.closed = False
         self.cursors_closed = 0
         self.last_dictionary = None
@@ -133,6 +141,9 @@ class FakeConn:
 
     def commit(self):
         self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
 
     def close(self):
         self.closed = True

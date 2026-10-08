@@ -11,6 +11,10 @@ erDiagram
     users    ||--o{ comments   : "writes"
     comments |o--o{ comments   : "has replies"
     users    |o--o{ llm_usage  : "uses"
+    users    ||--o{ reports    : "reports"
+    posts    |o--o{ reports    : "reported in"
+    comments |o--o{ reports    : "reported in"
+    users    |o--o{ reports    : "resolves"
 
     users {
         int     id            PK
@@ -90,4 +94,17 @@ erDiagram
         int       latency_ms
         int       prompt_chars
         int       reply_chars
+    }
+
+    reports {
+        int       id          PK
+        int       reporter_id FK, UK
+        int       post_id     FK, UK
+        int       comment_id  FK, UK
+        enum      reason
+        varchar   details
+        enum      status
+        int       resolved_by FK
+        timestamp resolved_at
+        timestamp created_at
     }

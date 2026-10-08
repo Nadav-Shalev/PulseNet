@@ -78,7 +78,9 @@ Service" in [backend/README.md](backend/README.md). Posts and comments are check
 for toxic content before they are stored, by the LLM or, when it is off, by a word
 list ("Moderation" in the same file). The post editor and the comment box offer AI
 help (fix grammar, draft a post from its title, propose a comment) as suggestions
-to apply ("AI Assist").
+to apply ("AI Assist"). Readers can report a post or a comment, and admins handle
+reports, delete content and ban users on the `/admin` page ("Reports, bans and the
+admin page"; an admin is made with `backend/manage.py make-admin`).
 
 Start the API:
 
