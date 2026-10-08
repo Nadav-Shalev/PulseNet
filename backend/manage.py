@@ -6,6 +6,8 @@
     python backend/manage.py mail-check --to ADDRESS           # one real mail through the mailer
     python backend/manage.py llm-record [--case NAME] --dry-run  # the recording it would make
     python backend/manage.py llm-record [--case NAME ...]      # record replies for the replay tests
+    python backend/manage.py agent-tick [--agent NAME] --dry-run  # what one agent would do
+    python backend/manage.py agent-tick [--agent NAME]         # one agent does one thing
 
 The database settings come from backend/.env (DB_HOST, DB_USER, DB_PASSWORD,
 DB_NAME); real environment variables win over it. Every command first prints which
@@ -30,6 +32,13 @@ first prints today's count and refuses to start unless the daily limit leaves ro
 for every call, so set LLM_DAILY_LIMIT to today's count plus the number of cases:
 the limit is then the hard stop. The first failure stops it, with no retry.
 --dry-run shows all of this and makes no call.
+
+agent-tick runs one tick of the AI agents (backend/agents/): one agent, at random
+or the one named with --agent, does at most one thing: reply, comment, post, like
+or follow. A text action is one LLM call to write it plus the moderation call, both
+in llm_usage and under the daily limit; with the LLM off (LLM_PROVIDER unset) only
+like and follow can happen. --dry-run makes the reads and shows the action and the
+prompt size, with no LLM call and no write.
 """
 
 import argparse
@@ -41,14 +50,17 @@ from pathlib import Path
 import mysql.connector
 from dotenv import load_dotenv
 
+import agents
 import llm
 import llm_replay
 import mailer
+import moderation
 import password_reset
 
 BACKEND_DIR = Path(__file__).resolve().parent
 ENV_FILE    = BACKEND_DIR / ".env"
 DEFAULT_HOST = "127.0.0.1"   # what mysql.connector uses when DB_HOST is not set
+DB_TIME_ZONE = "+00:00"      # the agents' connections, like app.py's
 DEFAULT_CHECK_PROMPT = "In one short sentence, say hello to PulseNet."
 MAX_SHOWN_REPLY = 300        # llm-check prints at most this much of the reply
 
@@ -57,13 +69,18 @@ class CommandError(Exception):
     """A problem the CLI reports as a one-line error (exit code 1)."""
 
 
-def connect():
+def connect(**options):
     return mysql.connector.connect(
         host=os.getenv("DB_HOST"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
         database=os.getenv("DB_NAME"),
+        **options,
     )
+
+
+def connect_utc():
+    return connect(time_zone=DB_TIME_ZONE)
 
 
 def describe_target(cursor):
@@ -118,6 +135,10 @@ def _parse_args(argv):
                      help="show the target, today's count and the cases, without calling")
     rec.add_argument("--out-dir", default=str(llm_replay.FIXTURES_DIR),
                      help="where the fixtures go (default: backend/tests/fixtures/llm_replies)")
+    tick = commands.add_parser("agent-tick", help="one AI agent does one thing")
+    tick.add_argument("--agent", help="the agent's username (default: one at random)")
+    tick.add_argument("--dry-run", action="store_true",
+                      help="show the agent, the action and the prompt size, without calling or writing")
     return parser.parse_args(argv)
 
 
@@ -238,6 +259,34 @@ def _run_llm_record(args):
             conn.close()
 
 
+def _run_agent_tick(args):
+    try:
+        service = llm.from_env(os.environ, connect=connect)
+    except llm.LLMConfigError as exc:
+        service = None   # off or misconfigured: the agents can still like and follow
+        print(f"manage: LLM off ({exc}): only like and follow", flush=True)
+    conn = None
+    try:
+        conn = connect()
+        print(f"manage: {describe_target(conn.cursor())}", flush=True)
+        if service is not None:
+            print(f"manage: LLM {service.describe()}", flush=True)
+        conn.close()
+        conn = None
+        result = agents.run_tick(service, moderation.Moderator(service), connect_utc,
+                                 agent=args.agent, dry_run=args.dry_run)
+        detail = ", ".join(f"{key} {value}" for key, value in result.detail.items())
+        print(f"manage: agent {result.agent or '-'}, skill {result.skill or '-'}: "
+              f"{result.outcome}" + (f" ({detail})" if detail else ""))
+        return 0
+    except mysql.connector.Error as exc:
+        print(f"manage: FAILED: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def main(argv=None):
     args = _parse_args(argv)
     load_dotenv(ENV_FILE)  # real env vars (e.g. DB_NAME=pulsenet_e2e ...) win over .env
@@ -250,6 +299,8 @@ def main(argv=None):
         return _run_llm_check(args)
     if args.command == "llm-record":
         return _run_llm_record(args)
+    if args.command == "agent-tick":
+        return _run_agent_tick(args)
     return _run_make_admin(args)
 
 

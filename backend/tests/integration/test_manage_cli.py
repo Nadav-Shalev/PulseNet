@@ -1,4 +1,4 @@
-"""manage.py make-admin and llm-check against the hand-rolled DB double (no real MySQL).
+"""manage.py make-admin, llm-check, mail-check, llm-record and agent-tick against the hand-rolled DB double (no real MySQL).
 
 ``manage.connect`` is patched to return a ``FakeConn`` seeded with what the command
 reads, in order. make-admin: the server version, then the user's ``(id, role)`` row.
@@ -420,6 +420,100 @@ class LlmRecordTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("FAILED", err.getvalue())
+
+AGENT_ROW = {"id": 131, "username": "leo_ai", "name": "Leo Marchetti", "personality": "You are Leo."}
+
+
+class AgentTickTests(unittest.TestCase):
+    """agent-tick: every connection is the same FakeConn, seeded with the server
+    version, then the agent list and what the triggers read."""
+
+    def run_main(self, argv, conn, env):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(manage, "connect", return_value=conn) as connect, \
+             patch.object(manage, "load_dotenv"), \
+             patch.dict(manage.os.environ, env, clear=True), \
+             redirect_stdout(out), redirect_stderr(err):
+            code = manage.main(argv)
+        self.connect = connect
+        return code, out.getvalue(), err.getvalue()
+
+    def likeable(self):
+        # The version; the agent; no trending tags, nobody to follow, post 12 to like.
+        # (The LLM is off, so no trigger of an LLM skill reads anything.)
+        return FakeConn(fetchone=[("9.7.0",)], fetchall=[[AGENT_ROW], [], [{"id": 12}]])
+
+    def test_dry_run_with_the_llm_off_shows_the_action_and_writes_nothing(self):
+        conn = self.likeable()
+
+        code, out, err = self.run_main(["agent-tick", "--dry-run"], conn, ENV)
+
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertRegex(lines[0], r"^manage: LLM off \(LLM_PROVIDER is not set.*\): only like and follow$")
+        self.assertEqual(lines[1], "manage: MySQL 9.7.0 at db.example.internal, database pulsenet_db")
+        self.assertEqual(lines[2], "manage: agent leo_ai, skill like_or_follow: dry_run (like 12)")
+        self.assertFalse(conn.ran("insert"))
+        self.assertEqual(conn.commits, 0)
+        for secret in (ENV["DB_USER"], ENV["DB_PASSWORD"]):
+            self.assertNotIn(secret, out + err)
+
+    def test_a_tick_likes_and_its_connections_are_utc(self):
+        conn = self.likeable()
+
+        code, out, err = self.run_main(["agent-tick"], conn, ENV)
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[-1], "manage: agent leo_ai, skill like_or_follow: liked (like 12)")
+        self.assertEqual(conn.params_for("insert ignore into likes"), (131, 12))
+        self.assertEqual(conn.commits, 1)
+        # The first connection only names the target; the tick's read and write are UTC.
+        self.assertEqual([c.kwargs for c in self.connect.call_args_list],
+                         [{}, {"time_zone": "+00:00"}, {"time_zone": "+00:00"}])
+        self.assertTrue(conn.closed)
+
+    def test_a_named_agent_that_is_not_there(self):
+        conn = FakeConn(fetchone=[("9.7.0",), None])
+
+        code, out, _ = self.run_main(["agent-tick", "--agent", "rex_ai"], conn, ENV)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines()[-1], "manage: agent -, skill -: no_agent (asked rex_ai)")
+        self.assertEqual(conn.params_for("username = %s"), ("rex_ai",))
+
+    def test_with_the_llm_on_it_names_the_provider(self):
+        conn = FakeConn(fetchone=[("9.7.0",)], fetchall=[[AGENT_ROW]])
+
+        code, out, err = self.run_main(["agent-tick", "--dry-run"], conn, {**ENV, "LLM_PROVIDER": "fake"})
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[1], "manage: LLM fake (canned replies, no network)")
+        # Nothing to answer or comment on, and no post yet (MAX(created_at) is NULL):
+        # the agent would write its first post. The dry run only sizes the prompt.
+        self.assertRegex(out.splitlines()[-1],
+                         r"^manage: agent leo_ai, skill write_post: dry_run \(prompt_chars \d+\)$")
+        self.assertFalse(conn.ran("insert"))
+
+    def test_a_db_error_exits_1(self):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(manage, "connect", side_effect=mysql.connector.Error("2003: Can't connect")), \
+             patch.object(manage, "load_dotenv"), \
+             patch.dict(manage.os.environ, ENV, clear=True), \
+             redirect_stdout(out), redirect_stderr(err):
+            code = manage.main(["agent-tick"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("manage: FAILED: 2003: Can't connect", err.getvalue())
+
+    def test_a_db_error_after_the_target_line_closes_that_connection(self):
+        conn = FakeConn(raise_on={"select version()": mysql.connector.Error("2013: Lost connection")})
+
+        code, _, err = self.run_main(["agent-tick"], conn, ENV)
+
+        self.assertEqual(code, 1)
+        self.assertIn("Lost connection", err)
+        self.assertTrue(conn.closed)
+
 
 if __name__ == "__main__":
     unittest.main()
