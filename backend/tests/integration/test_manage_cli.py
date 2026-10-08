@@ -336,5 +336,90 @@ class MailCheckTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
 
+class LlmRecordTests(unittest.TestCase):
+    run_main = LlmCheckTests.run_main
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.out = Path(self._dir.name)
+
+    def tearDown(self):
+        self._dir.cleanup()
+
+    def record(self, *extra, count=0, env=None):
+        conn = FakeConn(fetchone=[("9.7.0",), (count,)])
+        argv = ["llm-record", "--out-dir", str(self.out), *extra]
+        code, out, err = self.run_main(argv, conn, {**ENV, "LLM_PROVIDER": "fake", **(env or {})})
+        return code, out, err, conn
+
+    def test_dry_run_shows_the_plan_and_makes_no_call(self):
+        code, out, err, conn = self.record("--dry-run", count=5)
+
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "manage: MySQL 9.7.0 at db.example.internal, database pulsenet_db")
+        self.assertEqual(lines[1], "manage: LLM fake (canned replies, no network)")
+        self.assertEqual(lines[2], "manage: today 5/100 LLM calls")
+        self.assertTrue(lines[3].startswith("manage: 8 real call(s): moderation_clean, moderation_toxic"))
+        self.assertEqual(lines[4], "manage: dry run: no call made")
+        self.assertFalse(conn.ran("insert into llm_usage"))
+        self.assertEqual(list(self.out.iterdir()), [])
+        self.assertTrue(conn.closed)
+
+    def test_it_refuses_to_start_when_the_limit_has_no_room_for_every_call(self):
+        code, _out, err, conn = self.record(count=5, env={"LLM_DAILY_LIMIT": "12"})
+
+        self.assertEqual(code, 1)
+        self.assertIn("refused: the daily limit leaves room for 7 call(s), and 8 are needed", err)
+        self.assertFalse(conn.ran("insert into llm_usage"))
+        self.assertEqual(list(self.out.iterdir()), [])
+
+    def test_the_named_cases_are_recorded_once_each(self):
+        code, out, err, conn = self.record("--case", "moderation_clean", "--case", "correct_text",
+                                           "--case", "moderation_clean", count=3,
+                                           env={"LLM_DAILY_LIMIT": "5"})
+
+        self.assertEqual(code, 0, err)
+        self.assertIn("manage: 2 real call(s): moderation_clean, correct_text", out)
+        self.assertEqual(sorted(p.name for p in (self.out / "fake").iterdir()),
+                         ["correct_text.json", "moderation_clean.json"])
+        purposes = [params[3] for _sql, params in conn.find("insert into llm_usage")]
+        self.assertEqual(purposes, ["moderation", "ai_correct"])
+        self.assertIn(f"manage: saved 2 fixture(s) in {self.out / 'fake'}", out)
+
+    def test_an_unknown_case_is_a_usage_error(self):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+            manage.main(["llm-record", "--case", "nope"])
+
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_a_failed_call_stops_the_run(self):
+        timeout = requests.exceptions.ReadTimeout("read timed out")
+        with patch.object(requests, "post", side_effect=timeout):
+            conn = FakeConn(fetchone=[("9.7.0",), (0,)])
+            code, _out, err = self.run_main(["llm-record", "--out-dir", str(self.out)], conn, GEMINI_ENV)
+
+        self.assertEqual(code, 1)
+        self.assertIn("manage: LLM FAILED:", err)
+        self.assertIn("(stopped, no retry)", err)
+        self.assertEqual(len(conn.find("insert into llm_usage")), 1)   # one call, then stop
+        self.assertEqual(list(self.out.iterdir()), [])
+
+    def test_bad_llm_settings_exit_2(self):
+        code, _out, err = self.run_main(["llm-record"], FakeConn(), {**ENV, "LLM_PROVIDER": "nope"})
+
+        self.assertEqual(code, 2)
+        self.assertIn("LLM_PROVIDER must be one of", err)
+
+    def test_a_database_error_exits_1(self):
+        with patch.object(manage, "connect", side_effect=manage.mysql.connector.Error("refused")), \
+             patch.object(manage, "load_dotenv"), \
+             patch.dict(manage.os.environ, {**ENV, "LLM_PROVIDER": "fake"}, clear=True), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            code = manage.main(["llm-record", "--dry-run"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAILED", err.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

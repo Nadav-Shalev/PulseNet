@@ -1,0 +1,10 @@
+{
+  "case": "moderation_toxic",
+  "purpose": "moderation",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 959,
+  "prompt_sha256": "48c55d413ca87f10f29390c233a1d79cae02e4b13db63a20140584855a8d40a4",
+  "reply": "{\n  \"toxic\": true,\n  \"category\": \"harassment\"\n}"
+}

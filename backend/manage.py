@@ -4,6 +4,8 @@
     python backend/manage.py make-admin <username>             # give the user the admin role
     python backend/manage.py llm-check [--prompt TEXT]         # one real call through the LLM service
     python backend/manage.py mail-check --to ADDRESS           # one real mail through the mailer
+    python backend/manage.py llm-record [--case NAME] --dry-run  # the recording it would make
+    python backend/manage.py llm-record [--case NAME ...]      # record replies for the replay tests
 
 The database settings come from backend/.env (DB_HOST, DB_USER, DB_PASSWORD,
 DB_NAME); real environment variables win over it. Every command first prints which
@@ -21,6 +23,13 @@ and counts against the daily limit like any other.
 mail-check sends one test mail with the MAIL_* / SMTP_* settings (see
 backend/mailer.py) and prints the mailer it used (never the password) and where
 reset links will point (APP_BASE_URL). It needs no database.
+
+llm-record makes one real call per case of llm_replay.py (all eight, or the ones
+named with --case) and saves each reply as a fixture of the replay tests. It
+first prints today's count and refuses to start unless the daily limit leaves room
+for every call, so set LLM_DAILY_LIMIT to today's count plus the number of cases:
+the limit is then the hard stop. The first failure stops it, with no retry.
+--dry-run shows all of this and makes no call.
 """
 
 import argparse
@@ -33,6 +42,7 @@ import mysql.connector
 from dotenv import load_dotenv
 
 import llm
+import llm_replay
 import mailer
 import password_reset
 
@@ -101,6 +111,13 @@ def _parse_args(argv):
                        help="what to ask (default: a one-sentence hello)")
     mail = commands.add_parser("mail-check", help="send one test mail through the mailer")
     mail.add_argument("--to", required=True, help="the address to send it to")
+    rec = commands.add_parser("llm-record", help="record real LLM replies for the replay tests")
+    rec.add_argument("--case", action="append", choices=list(llm_replay.CASES_BY_NAME),
+                     help="record only this case (repeatable; default: all)")
+    rec.add_argument("--dry-run", action="store_true",
+                     help="show the target, today's count and the cases, without calling")
+    rec.add_argument("--out-dir", default=str(llm_replay.FIXTURES_DIR),
+                     help="where the fixtures go (default: backend/tests/fixtures/llm_replies)")
     return parser.parse_args(argv)
 
 
@@ -181,6 +198,46 @@ def _run_mail_check(args):
     return 0
 
 
+def _run_llm_record(args):
+    try:
+        service = llm.from_env(os.environ, connect=connect)
+    except llm.LLMConfigError as exc:
+        print(f"manage: {exc}", file=sys.stderr)
+        return 2
+    names = args.case or list(llm_replay.CASES_BY_NAME)
+    cases = [llm_replay.CASES_BY_NAME[name] for name in dict.fromkeys(names)]
+    conn = None
+    try:
+        conn = connect()
+        print(f"manage: {describe_target(conn.cursor())}", flush=True)
+        print(f"manage: LLM {service.describe()}", flush=True)
+        used, limit = service.usage_today()
+        print(f"manage: today {used}/{limit} LLM calls", flush=True)
+        print(f"manage: {len(cases)} real call(s): {', '.join(case.name for case in cases)}", flush=True)
+        if args.dry_run:
+            print("manage: dry run: no call made")
+            return 0
+        # Start only if every call fits: a half-made recording would need a second run.
+        if used + len(cases) > limit:
+            print(f"manage: refused: the daily limit leaves room for {max(limit - used, 0)} call(s), "
+                  f"and {len(cases)} are needed (LLM_DAILY_LIMIT)", file=sys.stderr)
+            return 1
+        written = llm_replay.record(service, cases, args.out_dir,
+                                    log=lambda line: print(f"manage: {line}", flush=True))
+        print(f"manage: saved {len(written)} fixture(s) in "
+              f"{Path(args.out_dir) / service.provider.name}")
+        return 0
+    except llm.LLMError as exc:
+        print(f"manage: LLM FAILED: {exc} (stopped, no retry)", file=sys.stderr)
+        return 1
+    except mysql.connector.Error as exc:
+        print(f"manage: FAILED: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def main(argv=None):
     args = _parse_args(argv)
     load_dotenv(ENV_FILE)  # real env vars (e.g. DB_NAME=pulsenet_e2e ...) win over .env
@@ -191,6 +248,8 @@ def main(argv=None):
         return 2
     if args.command == "llm-check":
         return _run_llm_check(args)
+    if args.command == "llm-record":
+        return _run_llm_record(args)
     return _run_make_admin(args)
 
 

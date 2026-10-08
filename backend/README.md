@@ -9,7 +9,8 @@ social graph endpoints, and local image uploads for the React frontend.
 backend/
 ├── app.py
 ├── migrate.py        schema migrations (see ../database/README.md)
-├── manage.py         admin commands: make-admin, llm-check, mail-check
+├── manage.py         admin commands: make-admin, llm-check, mail-check, llm-record
+├── llm_replay.py     real LLM replies recorded for the replay tests (llm-record)
 ├── llm/              the LLM service: providers, daily limit, usage log, prompt helpers
 ├── moderation.py     checks posts and comments for toxic content before they are stored
 ├── ai_assist.py      prompts for AI help: correct a draft, draft a post, propose a comment
@@ -306,7 +307,40 @@ python -m unittest discover tests
 ```
 
 The tests use Python `unittest` and patch the DB connection with test doubles, so
-they do not require a running MySQL server.
+they do not require a running MySQL server. They never call a real model or send
+mail: the LLM and mail are off for the suite, and a test turns them on with scripted
+replies (`patch_llm`) or an in-memory mailer (`patch_mail`).
+
+### Recorded LLM replies
+
+Scripted replies are written by hand, so they cannot show what a real model sends
+back (a JSON object spread over lines, a draft wrapped in the tags of its block,
+Markdown with links). `llm_replay.py` holds eight cases, built from fixed inputs by
+the same prompt functions production uses: four for moderation (clean, toxic
+without a listed word, a prompt injection, a quoted threat) and one for each kind
+of AI help. Their real replies are saved in
+`tests/fixtures/llm_replies/<provider>/<case>.json`, with the SHA-256 of the prompt
+each one answered, and never the prompt text, the provider's URL or its key.
+
+The replay tests (`tests/unit/test_llm_replay.py`,
+`tests/integration/test_llm_replay_api.py`) feed those replies, at no cost, to the
+code that reads them: the moderation verdict parser and the AI endpoints (cleaning,
+Markdown, sanitizing, the length cut), and they check that each endpoint sends
+exactly the recorded prompt. They fail when a prompt has changed since its
+recording, because a new prompt needs a new reply. Re-record only then, or for a new
+model; each case is one real call, counted like any other:
+
+```bash
+python backend/manage.py llm-record --dry-run                  # target, today's count, the cases; no call
+LLM_DAILY_LIMIT=<today+8> python backend/manage.py llm-record   # all eight
+python backend/manage.py llm-record --case moderation_quote    # just one
+```
+
+`llm-record` refuses to start unless the daily limit leaves room for every call it
+would make, and the first failure stops it without a retry. The recording kept in
+the repo is from the course endpoint (`course/`, 2026-10-08). A model's wrong
+answer is kept as recorded and listed in `KNOWN_MODEL_MISSES` in the unit test:
+the course model blocks a comment that quotes a threat in order to condemn it.
 
 ## Security Notes
 

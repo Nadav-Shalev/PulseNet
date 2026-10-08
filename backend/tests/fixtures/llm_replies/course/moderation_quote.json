@@ -1,0 +1,10 @@
+{
+  "case": "moderation_quote",
+  "purpose": "moderation",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 963,
+  "prompt_sha256": "07dc241926423606f2cb7c98fcc502980a96f27e53a451c66edcb5eacff3e3d4",
+  "reply": "{\n  \"toxic\": true,\n  \"category\": \"threat\"\n}"
+}
