@@ -97,6 +97,17 @@ class LoginTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 400)
 
+    def test_a_password_over_72_bytes_is_401_without_reaching_bcrypt(self):
+        # No account can have one (signup refuses it), and bcrypt 5 would raise.
+        conn = FakeConn(fetchone=[_login_row()])
+        with patch_db(conn):
+            resp = client().post("/api/login",
+                                 json={"email": "ada@example.com", "password": "x" * 73})
+
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.get_json(), {"error": "Invalid email or password"})
+        self.assertFalse(conn.ran("insert into sessions"))
+
     def test_login_in_mock_mode_returns_503(self):
         conn = FakeConn()
         with patch_db(conn, db_available=False):

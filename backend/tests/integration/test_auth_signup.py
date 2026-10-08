@@ -101,6 +101,26 @@ class SignupIntegrationTests(unittest.TestCase):
         self.assertEqual(resp.get_json()["error"], "password is required")
         self.assertEqual(conn.executed, [])
 
+    def test_signup_rejects_a_password_over_72_bytes_before_db_work(self):
+        # bcrypt 5 raises ValueError on it: this used to be a 500.
+        conn = FakeConn()
+
+        with patch_db(conn):
+            resp = client().post("/api/users", json=_signup_payload(password="x" * 73))
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json()["error"], "Password is too long (at most 72 bytes)")
+        self.assertEqual(conn.executed, [])
+
+    def test_signup_accepts_a_72_byte_password(self):
+        conn = FakeConn(fetchone=[None, None], lastrowid=7)
+
+        with patch_db(conn):
+            resp = client().post("/api/users", json=_signup_payload(password="x" * 72))
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(conn.ran("insert into users"))
+
     def test_signup_in_mock_mode_returns_503(self):
         # Arrange
         conn = FakeConn()

@@ -161,5 +161,34 @@ class PayloadTypeTests(unittest.TestCase):
         self.assertEqual(normalized["password"], " pw ")
 
 
+
+class PasswordRuleTests(unittest.TestCase):
+    """bcrypt 5 raises ValueError past 72 bytes, so a longer password must be a 400
+    before it reaches _hash_password, not a 500 inside it."""
+
+    def test_empty_password_is_required(self):
+        self.assertEqual(app._password_error(""), "password is required")
+
+    def test_72_bytes_is_the_most_bcrypt_takes(self):
+        self.assertIsNone(app._password_error("a" * 72))
+        self.assertEqual(app._password_error("a" * 73), app.PASSWORD_TOO_LONG)
+
+    def test_the_limit_counts_utf8_bytes_not_characters(self):
+        # 37 Hebrew letters are 74 bytes in UTF-8: over the limit at 37 characters.
+        self.assertEqual(app._password_error("א" * 37), app.PASSWORD_TOO_LONG)
+        self.assertIsNone(app._password_error("א" * 36))
+
+    def test_every_password_that_passes_can_be_hashed(self):
+        for password in ("a" * 72, "א" * 36, "😀" * 18):
+            with self.subTest(length=len(password)):
+                self.assertIsNone(app._password_error(password))
+                app._hash_password(password)   # no ValueError
+
+    def test_signup_uses_the_rule(self):
+        _normalized, error = app._validate_signup_payload(_valid_signup(password="x" * 73))
+
+        self.assertEqual(error, app.PASSWORD_TOO_LONG)
+
+
 if __name__ == "__main__":
     unittest.main()
