@@ -124,8 +124,11 @@ class PostModerationTests(unittest.TestCase):
 
 class CommentModerationTests(unittest.TestCase):
     def _comment(self, body, fetchone=(), post_id=7):
-        conn = FakeConn(fetchone=[_session_user(), *fetchone], lastrowid=9)
-        with patch_db(conn):
+        # The session is read on a connection of its own, so ``conn`` (the comment's)
+        # is closed only if create_comment closes it.
+        session = FakeConn(fetchone=[_session_user()])
+        conn = FakeConn(fetchone=list(fetchone), lastrowid=9)
+        with patch_db(conn), patch.object(app, "get_db_connection", side_effect=[session, conn]):
             resp = _authed_client().post(f"/api/articles/{post_id}/comments", json=body)
         return resp, conn
 

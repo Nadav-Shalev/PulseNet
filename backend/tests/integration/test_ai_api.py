@@ -41,9 +41,13 @@ def _session_user(**over):
 
 
 def _call(route, body, fetchone=(), conn=None):
-    """POST ``body`` to ``route`` as the session user 42; returns (response, conn)."""
-    conn = conn or FakeConn(fetchone=[_session_user(), *fetchone])
-    with patch_db(conn):
+    """POST ``body`` to ``route`` as the session user 42; returns (response, conn).
+
+    require_session reads the user on a connection of its own, so ``conn`` (the
+    request's, seeded with ``fetchone``) is closed only if the endpoint closes it."""
+    session = FakeConn(fetchone=[_session_user()])
+    conn = conn or FakeConn(fetchone=list(fetchone))
+    with patch_db(conn), patch.object(app, "get_db_connection", side_effect=[session, conn]):
         c = client()
         c.set_cookie("session_id", "valid-sid")
         resp = c.post(route, json=body)
@@ -276,7 +280,7 @@ class SuggestCommentTests(unittest.TestCase):
         self.assertIn("<post_body>\nplain body\n</post_body>", llm.provider.calls[0][0])
 
     def test_the_db_connection_is_closed_before_the_llm_is_asked(self):
-        conn = FakeConn(fetchone=[_session_user(), POST_ROW])
+        conn = FakeConn(fetchone=[POST_ROW])
         seen = []
 
         class WatchingProvider:
@@ -339,7 +343,7 @@ class SuggestCommentTests(unittest.TestCase):
                 return cursor
 
         with patch_llm("never sent") as llm:
-            resp, conn = _call("/api/ai/suggest-comment", {"post_id": 7}, conn=PostsDown(fetchone=[_session_user()]))
+            resp, conn = _call("/api/ai/suggest-comment", {"post_id": 7}, conn=PostsDown())
 
         self.assertEqual(resp.status_code, 503)
         self.assertEqual(llm.provider.calls, [])
