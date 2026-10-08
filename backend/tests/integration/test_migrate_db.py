@@ -288,6 +288,7 @@ class MainCliTests(MigrationsDirMixin, unittest.TestCase):
         self.assertTrue(conn.ran("CREATE TABLE comments ("))
         self.assertTrue(conn.ran("CREATE TABLE llm_usage ("))
         self.assertTrue(conn.ran("CREATE TABLE reports ("))
+        self.assertTrue(conn.ran("CREATE TABLE password_resets ("))
         # Every migration file ran and was recorded, in number order.
         everything = [m.version for m in migrate.discover_migrations(migrate.MIGRATIONS_DIR)]
         self.assertEqual(self.recorded_versions(conn), everything)
