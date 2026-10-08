@@ -17,16 +17,19 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import CircularProgress from '@mui/material/CircularProgress';
+import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutlineOutlined';
 import {
   fetchArticleById, deleteArticle, removePostTag, likeArticle, unlikeArticle,
 } from '../api/api';
 import { UserContext } from '../context/UserContext';
+import CommentsSection from './CommentsSection';
 import { postTimeAgo } from '../utils/timeAgo';
 
 // `manage` enables owner-only controls (delete post, remove a hashtag). It is only
@@ -47,6 +50,8 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const [likeCount, setLikeCount] = useState(post?.like_count ?? 0);
   const [likeBusy, setLikeBusy] = useState(false);
   const [likeError, setLikeError] = useState('');
+  // Starts from the feed; the dialog's comment thread updates it after each change.
+  const [commentCount, setCommentCount] = useState(post?.comment_count ?? 0);
   const { currentUser, authReady } = useContext(UserContext);
   const navigate = useNavigate();
   // Below sm (600px) the full post fills the screen instead of a narrow box.
@@ -246,6 +251,21 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
               {likeCount}
             </Typography>
           </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {/* Comments are read and written in the post's dialog. */}
+            <IconButton
+              size="small"
+              onClick={handleOpen}
+              aria-label="Comments"
+              title="Comments"
+              data-testid="comment-button"
+            >
+              <ChatBubbleOutlineIcon fontSize="small" />
+            </IconButton>
+            <Typography variant="body2" color="text.secondary" data-testid="comment-count">
+              {commentCount}
+            </Typography>
+          </Box>
           {manage && managing && (
             <Button
               variant="outlined"
@@ -329,6 +349,8 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
               dangerouslySetInnerHTML={{ __html: fullHtml || '' }}
             />
           )}
+          <Divider sx={{ my: 2 }} />
+          <CommentsSection postId={post.id} onCountChange={setCommentCount} />
         </DialogContent>
 
         <DialogActions>
