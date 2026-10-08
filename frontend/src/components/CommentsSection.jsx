@@ -11,9 +11,12 @@ import DialogTitle from '@mui/material/DialogTitle';
 import IconButton from '@mui/material/IconButton';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
-import { createComment, deleteComment, fetchComments } from '../api/api';
+import SpellcheckIcon from '@mui/icons-material/Spellcheck';
+import { aiCorrect, aiSuggestComment, createComment, deleteComment, fetchComments } from '../api/api';
 import { UserContext } from '../context/UserContext';
+import { AiSuggestion, useAiAssist } from './AiSuggestion';
 import { textToHtml } from '../utils/textToHtml';
 import { timeAgo } from '../utils/timeAgo';
 
@@ -23,8 +26,13 @@ const MAX_COMMENT_CHARS = 2000;
 // Every comment in the tree, replies included (what the card's count shows).
 const countAll = (tree) => tree.reduce((n, c) => n + 1 + (c.replies?.length ?? 0), 0);
 
-// A comment box: plain text, counted against the limit, sent as escaped HTML.
-function CommentForm({ value, onChange, onSubmit, onCancel, busy, label, placeholder, testid }) {
+// A comment box: plain text, counted against the limit, sent as escaped HTML. Its
+// AI buttons propose a comment on the post (or a reply to `parentId`) and fix the
+// grammar of what is typed; either way the result waits as a suggestion to apply.
+function CommentForm({ value, onChange, onSubmit, onCancel, busy, label, placeholder, testid, postId, parentId = null }) {
+  const ai = useAiAssist();
+  const working = busy || ai.busy;
+  const fill = (text) => onChange(text.slice(0, MAX_COMMENT_CHARS));
   return (
     <Box component="form" onSubmit={onSubmit} sx={{ mt: 1 }}>
       <TextField
@@ -35,21 +43,45 @@ function CommentForm({ value, onChange, onSubmit, onCancel, busy, label, placeho
         placeholder={placeholder}
         value={value}
         onChange={e => onChange(e.target.value)}
-        disabled={busy}
+        disabled={working}
         helperText={`${value.length}/${MAX_COMMENT_CHARS}`}
         slotProps={{ htmlInput: { maxLength: MAX_COMMENT_CHARS, 'data-testid': `${testid}-input` } }}
       />
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-        {onCancel && <Button size="small" onClick={onCancel} disabled={busy}>Cancel</Button>}
-        <Button
-          type="submit"
-          size="small"
-          variant="contained"
-          disabled={busy || !value.trim()}
-          data-testid={`${testid}-submit`}
-        >
-          {label}
-        </Button>
+      <AiSuggestion assist={ai} />
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mr: 'auto' }}>
+          <Button
+            size="small"
+            startIcon={<AutoAwesomeIcon />}
+            onClick={() => ai.run(() => aiSuggestComment(postId, parentId), { onApply: fill })}
+            disabled={working}
+            data-testid={`${testid}-ai-suggest`}
+          >
+            Suggest
+          </Button>
+          <Button
+            size="small"
+            startIcon={<SpellcheckIcon />}
+            onClick={() => ai.run(() => aiCorrect(value.trim(), 'text'), { onApply: fill })}
+            disabled={working || !value.trim()}
+            data-testid={`${testid}-ai-correct`}
+          >
+            Fix grammar
+          </Button>
+        </Box>
+        {/* On a phone this group wraps under the AI buttons, still on the right. */}
+        <Box sx={{ display: 'flex', gap: 1, ml: 'auto' }}>
+          {onCancel && <Button size="small" onClick={onCancel} disabled={busy}>Cancel</Button>}
+          <Button
+            type="submit"
+            size="small"
+            variant="contained"
+            disabled={working || !value.trim()}
+            data-testid={`${testid}-submit`}
+          >
+            {label}
+          </Button>
+        </Box>
       </Box>
     </Box>
   );
@@ -235,6 +267,8 @@ export default function CommentsSection({ postId, onCountChange }) {
               label="Reply"
               placeholder={`Reply to @${c.user?.username}...`}
               testid="reply"
+              postId={postId}
+              parentId={c.id}
             />
           )}
         </Box>
@@ -255,6 +289,7 @@ export default function CommentsSection({ postId, onCountChange }) {
         label="Comment"
         placeholder="Write a comment..."
         testid="comment"
+        postId={postId}
       />
     ) : (
       <Button size="small" variant="outlined" onClick={() => navigate('/login')} data-testid="comment-login" sx={{ mt: 1 }}>

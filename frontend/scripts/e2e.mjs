@@ -127,6 +127,9 @@ async function main() {
       // Moderation asks the LLM about every post and comment the specs create (the
       // fake's echo is never cached), so the default 100 calls a day is too tight.
       LLM_DAILY_LIMIT: '1000',
+      // AI requests per user per day: low, so ai_assist.cy.js reaches the limit in
+      // a few calls. Every spec signs up fresh users, who start at zero.
+      AI_USER_DAILY_LIMIT: '5',
       MAIL_PROVIDER: 'file', // mails written to disk, never sent (mail service, later sessions)
       PYTHONUNBUFFERED: '1',
     },

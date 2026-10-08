@@ -232,6 +232,22 @@ Cookie: session_id=...
 Returns `401` without a valid session, `403` for someone else's comment, `404` if
 the comment does not exist, and `503` when the database is unavailable.
 
+### `aiCorrect(text, format)` / `aiSuggestPost(title, tags)` / `aiSuggestComment(postId, parentId)`
+
+AI assistance for the logged-in user. Each resolves to a suggestion and stores
+nothing: the UI (`components/AiSuggestion.jsx`) shows it with Apply and Dismiss.
+
+| Function | Request | Resolves to |
+| --- | --- | --- |
+| `aiCorrect(text, format = 'text')` | `POST /api/ai/correct {text, format}`; `format` is `'html'` for the post editor | the corrected text (sanitized HTML for `'html'`) |
+| `aiSuggestPost(title, tags = [])` | `POST /api/ai/suggest-post {title, tags}` | a draft body as sanitized HTML |
+| `aiSuggestComment(postId, parentId = null)` | `POST /api/ai/suggest-comment {post_id, parent_id}` | a proposed comment as plain text |
+
+Each throws an `Error` with the backend's message and `status`: `400` for bad
+input, `401` without a session, `404` for a missing post, `429` when a daily AI
+limit (the user's or the site's) or the provider's rate limit is reached, and `503`
+when AI assistance is off or failing.
+
 ---
 
 ## Error Responses
@@ -247,6 +263,7 @@ Common status codes:
 - `403` — not allowed (e.g. someone else's comment)
 - `404` — resource not found
 - `422` — moderation blocked a post or comment as toxic; nothing was stored
+- `429` — a daily AI limit, or the AI provider's rate limit, was reached
 - `503` — database unavailable (mock mode active for reads; writes blocked)
 
 ### Moderation (`422`)

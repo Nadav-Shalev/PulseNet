@@ -12,6 +12,7 @@ backend/
 ├── manage.py         admin commands: make-admin, llm-check
 ├── llm/              the LLM service: providers, daily limit, usage log, prompt helpers
 ├── moderation.py     checks posts and comments for toxic content before they are stored
+├── ai_assist.py      prompts for AI help: correct a draft, draft a post, propose a comment
 ├── mock_data.py
 ├── seed_data.py
 ├── requirements.txt
@@ -182,6 +183,27 @@ before it is stored; a blocked one is a `422` with its category (`harassment`,
 - A comment is checked after its post and parent are, so a `404` costs no LLM call.
   Moderation calls count against `LLM_DAILY_LIMIT`; once it is used up, the word
   list carries on alone.
+
+## AI Assist
+
+Three endpoints help write posts and comments (requirement c.i). They return a
+suggestion and store nothing; whatever the user publishes from one goes through
+moderation like anything else. Prompts are built in `ai_assist.py` with the same
+data blocks as moderation.
+
+| Endpoint | Body | Returns |
+| --- | --- | --- |
+| `POST /api/ai/correct` | `{"text": "...", "format": "text" or "html"}` | `{"text": "..."}`: the draft with its spelling and grammar fixed (HTML is sanitized before and after) |
+| `POST /api/ai/suggest-post` | `{"title": "...", "tags": [...]}` | `{"body_html": "..."}`: a draft body from the title, written as Markdown and sanitized |
+| `POST /api/ai/suggest-comment` | `{"post_id": 7, "parent_id": 3}` | `{"text": "..."}`: a proposed comment, or reply; the post and comment are read from the DB |
+
+- All need a session. `AI_USER_DAILY_LIMIT` (default 20, 0 refuses everyone) caps
+  each user's requests per UTC day, counting only these three purposes in
+  `llm_usage`, so moderating a user's posts never uses up their AI help.
+- Errors are meant for the user: `400` for bad input, `429` when the user's limit,
+  the site's `LLM_DAILY_LIMIT` or the provider's rate limit is reached (with
+  `Retry-After` when the provider sent one), and `503` when the LLM is off, too slow
+  or failing.
 
 ## Tests
 
