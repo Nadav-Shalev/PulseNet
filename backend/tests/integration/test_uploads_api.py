@@ -101,12 +101,29 @@ class UploadTests(_TempUploadDir):
 
         self.assertEqual(resp.status_code, 201)
         url = resp.get_json()["url"]
-        match = re.search(r"/uploads/([0-9a-f]{32}\.png)$", url)
+        match = re.fullmatch(r"/uploads/([0-9a-f]{32}\.png)", url)   # relative: no host, no port
         self.assertIsNotNone(match, url)
         # The client's filename (with its path tricks) is never used on disk.
         self.assertEqual(self.stored_files(), [match.group(1)])
         with open(os.path.join(self.upload_dir, match.group(1)), "rb") as saved:
             self.assertEqual(saved.read(), _png_bytes())
+
+    def test_the_url_ignores_the_host_a_proxy_forwards(self):
+        # On the EC2, nginx forwards "Host: <IP>" without the :8080 the site runs on.
+        # An absolute URL built from it pointed at port 80 (Apache: 404), and at an IP
+        # that changes on every restart. The relative path works on any origin.
+        conn = FakeConn(fetchone=[_session_user()])
+        c = client()
+        c.set_cookie("session_id", "valid-sid", domain="63.179.249.8")
+        with patch_db(conn):
+            resp = c.post("/api/upload", base_url="http://63.179.249.8/",
+                          data={"file": (BytesIO(_png_bytes()), "pic.png")},
+                          content_type="multipart/form-data")
+
+        self.assertEqual(resp.status_code, 201)
+        url = resp.get_json()["url"]
+        self.assertTrue(url.startswith("/uploads/"), url)
+        self.assertNotIn("63.179.249.8", url)
 
     def test_missing_file_field_returns_400(self):
         resp = self._upload(_png_bytes(), field="image")

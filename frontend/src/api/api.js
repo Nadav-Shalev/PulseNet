@@ -284,7 +284,8 @@ export const banUser = (userId) => postJson(`/admin/users/${userId}/ban`, {});
 
 export const unbanUser = (userId) => requestJson(`/admin/users/${userId}/ban`, { method: 'DELETE' });
 
-// Upload an image file to local backend storage; returns { url }. Used by the
+// Upload an image file to local backend storage; returns { url }, a relative
+// /uploads/<file> path (same origin as the page). Used by the
 // post editor (cover image) and the Edit Profile page (avatar).
 export const uploadImage = async (file) => {
   const form = new FormData();
