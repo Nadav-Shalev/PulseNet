@@ -21,6 +21,7 @@ erDiagram
     posts    ||--o{ comments   : "commented on"
     users    ||--o{ comments   : "writes"
     comments |o--o{ comments   : "has replies"
+    users    |o--o{ llm_usage  : "uses"
 
     users {
         int     id            PK
@@ -86,6 +87,20 @@ erDiagram
         int       parent_id  FK
         text      body_html
         timestamp created_at
+    }
+
+    llm_usage {
+        int       id           PK
+        date      usage_day
+        timestamp created_at
+        varchar   provider
+        varchar   model
+        varchar   purpose
+        int       user_id      FK
+        enum      status
+        int       latency_ms
+        int       prompt_chars
+        int       reply_chars
     }
 ```
 <!-- END GENERATED -->

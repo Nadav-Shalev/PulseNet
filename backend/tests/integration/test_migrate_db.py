@@ -286,6 +286,7 @@ class MainCliTests(MigrationsDirMixin, unittest.TestCase):
         # Later migrations have no IF NOT EXISTS: a table that already exists is drift.
         self.assertTrue(conn.ran("CREATE TABLE likes ("))
         self.assertTrue(conn.ran("CREATE TABLE comments ("))
+        self.assertTrue(conn.ran("CREATE TABLE llm_usage ("))
         # Every migration file ran and was recorded, in number order.
         everything = [m.version for m in migrate.discover_migrations(migrate.MIGRATIONS_DIR)]
         self.assertEqual(self.recorded_versions(conn), everything)

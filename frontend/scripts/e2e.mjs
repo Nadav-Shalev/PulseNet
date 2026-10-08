@@ -123,7 +123,7 @@ async function main() {
     env: {
       ...process.env,
       DB_NAME: E2E_DB, // wins over backend/.env: load_dotenv never overrides real env vars
-      LLM_PROVIDER: 'fake', // deterministic, offline replies (LLM service, later sessions)
+      LLM_PROVIDER: 'fake', // backend/llm answers offline and the same way every time: no key, no quota
       MAIL_PROVIDER: 'file', // mails written to disk, never sent (mail service, later sessions)
       PYTHONUNBUFFERED: '1',
     },
