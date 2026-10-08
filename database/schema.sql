@@ -101,3 +101,24 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (author_id) REFERENCES users(id)    ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE CASCADE
 );
+
+-- One row per LLM call (migration 004): the usage log behind the daily limit in
+-- backend/llm/. usage_day is the UTC day the call counts against; 'over_limit' rows
+-- were refused before reaching a provider and are not counted. Only sizes are kept,
+-- never the prompt or reply text. A deleted user's calls keep counting (SET NULL).
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    usage_day    DATE NOT NULL,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    provider     VARCHAR(32) NOT NULL,
+    model        VARCHAR(100),
+    purpose      VARCHAR(32) NOT NULL,
+    user_id      INT,
+    status       ENUM('ok', 'error', 'timeout', 'rate_limited', 'over_limit') NOT NULL,
+    latency_ms   INT,
+    prompt_chars INT NOT NULL,
+    reply_chars  INT NOT NULL DEFAULT 0,
+    INDEX idx_llm_usage_day (usage_day, status),
+    INDEX idx_llm_usage_user (user_id, usage_day),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
