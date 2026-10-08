@@ -308,6 +308,26 @@ def _verify_password(password, password_hash):
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
+# bcrypt reads at most 72 bytes, and bcrypt 5 raises ValueError on a longer
+# password instead of cutting it: the limit is checked first, for a 400.
+MAX_PASSWORD_BYTES = 72
+PASSWORD_TOO_LONG = f"Password is too long (at most {MAX_PASSWORD_BYTES} bytes)"
+
+
+def _password_too_long(password):
+    return len(password.encode("utf-8")) > MAX_PASSWORD_BYTES
+
+
+def _password_error(password):
+    """Why ``password`` cannot be set (signup, reset), or None. The limit is in
+    UTF-8 bytes: 72 ASCII characters, but only 36 Hebrew letters."""
+    if not password:
+        return "password is required"
+    if _password_too_long(password):
+        return PASSWORD_TOO_LONG
+    return None
+
+
 def _validate_signup_payload(data):
     """Returns (payload, error message or None). A wrong JSON type raises
     InputError (-> 400) instead."""
@@ -323,8 +343,9 @@ def _validate_signup_payload(data):
     if not payload["name"] or not payload["username"] or not payload["email"]:
         return payload, "name, username, and email are required"
 
-    if not payload["password"]:
-        return payload, "password is required"
+    password_error = _password_error(payload["password"])
+    if password_error:
+        return payload, password_error
 
     if len(payload["name"]) > 100:
         return payload, "Name must be 100 characters or fewer"
@@ -1782,7 +1803,9 @@ def login():
         conn.close()
         return jsonify({"error": "Invalid email or password"}), 401
 
-    if not _verify_password(password, user["password_hash"]):
+    # A password bcrypt cannot take matches no account (signup refuses it), and
+    # checking it would raise: it is just a wrong password.
+    if _password_too_long(password) or not _verify_password(password, user["password_hash"]):
         cursor.close()
         conn.close()
         return jsonify({"error": "Invalid email or password"}), 401
