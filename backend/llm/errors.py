@@ -31,3 +31,8 @@ class LLMRateLimited(LLMError):
 
 class LLMLimitReached(LLMError):
     """Our own daily limit (LLM_DAILY_LIMIT) is used up, so nothing was sent."""
+
+
+class LLMBadReply(LLMError):
+    """The provider answered, but not in the shape the caller asked for (no JSON
+    object, or one with the wrong fields). The call itself is logged as 'ok'."""

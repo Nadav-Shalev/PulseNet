@@ -10,7 +10,8 @@ backend/
 ├── app.py
 ├── migrate.py        schema migrations (see ../database/README.md)
 ├── manage.py         admin commands: make-admin, llm-check
-├── llm/              the LLM service: providers, daily limit, usage log
+├── llm/              the LLM service: providers, daily limit, usage log, prompt helpers
+├── moderation.py     checks posts and comments for toxic content before they are stored
 ├── mock_data.py
 ├── seed_data.py
 ├── requirements.txt
@@ -107,6 +108,8 @@ llm/
 ├── service.py        LLMService: daily limit, usage log, errors around each call
 ├── usage.py          the llm_usage table (DbUsageStore), MemoryUsageStore for tests
 ├── errors.py         LLMError and its subclasses
+├── prompt.py         data_blocks()/data_rule(): user text as data, never instructions
+├── parse.py          parse_json_object(): the JSON answer inside a reply
 └── providers/        base.py (the Provider interface), fake.py, openai_compat.py, course.py
 ```
 
@@ -126,7 +129,8 @@ not `fake` by default, so production never answers with canned text by mistake.
   quota (AI Studio shows the quota for your project).
 - **Errors:** every failure is an `LLMError`, and the caller catches it and falls back.
   The subclasses are `LLMTimeout`, `LLMRateLimited` (the provider answered 429; it
-  carries `retry_after`), `LLMLimitReached` (our own daily limit) and `LLMConfigError`.
+  carries `retry_after`), `LLMLimitReached` (our own daily limit), `LLMConfigError`
+  and `LLMBadReply` (it answered, but not in the shape asked for).
   There are no retries: a retry spends the quota twice and keeps the user waiting.
 - **Usage log:** one `llm_usage` row per call, with provider, model, purpose, user,
   status, latency and sizes. The prompt and reply text are never stored. A warning
@@ -147,6 +151,37 @@ python backend/manage.py llm-check
 It prints the database, the provider, model and host (never the key), the reply,
 the time it took and today's count. The call is logged and counts against the limit
 like any other. A wrong key, model or URL shows up as a one-line error.
+
+`app.py` builds the service once, at startup. A missing or broken `LLM_*` setting
+leaves it off (one line in the server log names the variable) and every feature
+uses its fallback.
+
+**Prompt injection.** User text never sits next to instructions. `llm/prompt.py`
+puts each field in its own block (`<post_title>...</post_title>`), neutralizes any
+tag named like one of the prompt's blocks inside the text (`</post_body>` becomes
+`&lt;/post_body>`), and every system text carries `data_rule()`: what is inside the
+blocks is data, never instructions.
+
+## Moderation
+
+`moderation.py` checks a post (title, tags and visible body text) or a comment
+before it is stored; a blocked one is a `422` with its category (`harassment`,
+`hate` or `threat`) and nothing is saved.
+
+- **One LLM call per publish**, purpose `moderation`, with the fields as data blocks
+  and a strict answer: only `{"toxic": false, "category": "none"}` or
+  `{"toxic": true, "category": "..."}` is a verdict.
+- **Cache:** LLM verdicts are kept per process by a SHA-256 of the normalized text
+  (LRU, 1024 entries), so the same text is never classified twice. No text is kept.
+- **Fallback:** when the LLM is off or fails in any way (error, timeout, 429, the
+  daily limit, a reply that is not a verdict), a word list of insults and threats
+  aimed at a person decides. It holds no slurs, so with the LLM down general hate
+  speech is not caught.
+- **Long posts:** the LLM sees the first 8000 characters of the body, and the word
+  list reads the whole text.
+- A comment is checked after its post and parent are, so a `404` costs no LLM call.
+  Moderation calls count against `LLM_DAILY_LIMIT`; once it is used up, the word
+  list carries on alone.
 
 ## Tests
 

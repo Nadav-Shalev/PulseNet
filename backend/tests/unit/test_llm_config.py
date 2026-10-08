@@ -159,10 +159,12 @@ class DailyLimitTests(unittest.TestCase):
 
 
 class PackageBoundaryTests(unittest.TestCase):
-    def test_llm_imports_neither_flask_nor_the_app_nor_a_db_driver(self):
+    def test_llm_and_moderation_import_neither_flask_nor_the_app_nor_a_db_driver(self):
         # In a fresh interpreter: this test process has long since imported Flask.
+        # moderation.py is held to the same rule: the agents (S14) run it outside Flask.
         code = (
-            "import sys, llm, llm.config, llm.service, llm.usage, llm.providers;"
+            "import sys, llm, llm.config, llm.service, llm.usage, llm.providers, llm.parse, llm.prompt,"
+            " moderation;"
             "print(','.join(sorted(m for m in ('flask', 'app', 'manage', 'mysql', 'mysql.connector')"
             " if m in sys.modules)))"
         )

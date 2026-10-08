@@ -115,7 +115,8 @@ Cookie: session_id=...
 }
 ```
 
-Returns `401` if the session cookie is missing or expired.
+Returns `401` if the session cookie is missing or expired, and `422` when
+moderation blocks the post (see below).
 
 **Response** `201` (a new post also has `"like_count": 0, "liked_by_me": false, "comment_count": 0`)
 ```json
@@ -208,8 +209,8 @@ Cookie: session_id=...
 
 Returns `400` for an empty comment, more than 2000 characters of text, or a
 `parent_id` that is not a top-level comment on this post (replies are one level
-deep); `401` without a valid session; `404` if the post does not exist; `503` when
-the database is unavailable.
+deep); `401` without a valid session; `404` if the post does not exist; `422` when
+moderation blocks the comment (see below); `503` when the database is unavailable.
 
 ---
 
@@ -245,4 +246,19 @@ Common status codes:
 - `401` — no valid session cookie
 - `403` — not allowed (e.g. someone else's comment)
 - `404` — resource not found
+- `422` — moderation blocked a post or comment as toxic; nothing was stored
 - `503` — database unavailable (mock mode active for reads; writes blocked)
+
+### Moderation (`422`)
+
+`POST /api/articles` and `POST /api/articles/<id>/comments` check the visible text
+before storing it. A blocked one answers `422` with the category
+(`harassment`, `hate` or `threat`), and the message is meant to be shown as is:
+```json
+{
+  "error": "This comment looks insulting or harassing, so it was not published. Please rephrase it.",
+  "category": "harassment"
+}
+```
+`createArticle` and `createComment` throw it as an `Error` with that message, so the
+editor and the comment box show it and keep the text for rephrasing.
