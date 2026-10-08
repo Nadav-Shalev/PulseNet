@@ -9,10 +9,12 @@ social graph endpoints, and local image uploads for the React frontend.
 backend/
 ├── app.py
 ├── migrate.py        schema migrations (see ../database/README.md)
-├── manage.py         admin commands: make-admin, llm-check
+├── manage.py         admin commands: make-admin, llm-check, mail-check
 ├── llm/              the LLM service: providers, daily limit, usage log, prompt helpers
 ├── moderation.py     checks posts and comments for toxic content before they are stored
 ├── ai_assist.py      prompts for AI help: correct a draft, draft a post, propose a comment
+├── mailer.py         sends email: to JSON files (development, E2E) or through SMTP
+├── password_reset.py the reset link's token, hash, URL and email
 ├── mock_data.py
 ├── seed_data.py
 ├── requirements.txt
@@ -238,6 +240,63 @@ data blocks as moderation.
   `Retry-After` when the provider sent one), and `503` when the LLM is off, too slow
   or failing.
 
+## Password Reset
+
+A forgotten password is reset with a one-time link sent by email (requirement a.i).
+
+| Endpoint | Body | Returns |
+| --- | --- | --- |
+| `POST /api/password/forgot` | `{"email": "..."}` | always the same `200` `{"message": ...}`, whether or not the address has an account |
+| `POST /api/password/reset` | `{"token": "...", "password": "..."}` | `200` when the password was changed; `400` for a bad, used or expired link |
+
+- **The token** is 32 random bytes (`secrets.token_urlsafe`). Only its SHA-256 is
+  stored (`password_resets.token_hash`), so the table opens no account; the token
+  itself is only in the email. A link works once, for 30 minutes.
+- **The link** is `APP_BASE_URL/reset-password#token=...`. It is built from
+  `APP_BASE_URL` and never from the request's `Host` or `Origin` header, which
+  anyone can set: a "forgot" request with `Host: evil.example` would otherwise mail
+  the victim a real token on the attacker's site ("password reset poisoning"). The
+  token sits in the URL fragment, which browsers never send to a server, so it stays
+  out of nginx's access log and out of `Referer` headers to image hosts.
+- **Forgot** finds the account by email (agents never get a link: they have no
+  password). At most 3 links per user per hour; past that it still answers `200` and
+  sends nothing. The link is stored before the mail goes out; if the mail fails, the
+  link is deleted again, so it neither stays valid unseen nor counts toward the
+  limit, and the answer is still the same `200`. Known limit: an address with an
+  account answers a little slower (the send), which is no new leak, since signup
+  already says "Email already registered".
+- **Reset** locks the link (`SELECT ... FOR UPDATE`, so two uses of one link run one
+  after the other), then in one transaction sets the bcrypt hash, marks this and
+  every other open link of the user as used, and deletes all their sessions (logged
+  out everywhere, as a ban does). It does not log in. A banned user can reset, and
+  their login still answers `403`. The password follows the signup rule (at most 72
+  bytes, bcrypt's limit).
+
+Mail goes through `mailer.py`, set by `MAIL_PROVIDER` (unset = mail off, and
+"forgot" answers `503`):
+
+| Setting | For | Default |
+| --- | --- | --- |
+| `MAIL_PROVIDER` | `file` (development, the E2E run) or `smtp` (production) | off |
+| `MAIL_OUTBOX_DIR` | `file`: one JSON file per mail, nothing is sent | `backend/outbox/` |
+| `SMTP_HOST`, `SMTP_PORT` | `smtp`: STARTTLS only (Google Workspace: `smtp.gmail.com`, `587`) | port `587` |
+| `SMTP_USER`, `SMTP_PASSWORD` | `smtp`: the sender account and its App Password (only in `.env`) | required |
+| `MAIL_FROM` | `smtp`: the From header | `PulseNet <SMTP_USER>` |
+| `SMTP_TIMEOUT_SECONDS` | `smtp`: 1 to 30 | `10` |
+| `APP_BASE_URL` | the site's public address, for the links | required with `smtp`; `http://localhost:5173` with `file` |
+
+On the EC2 the site is `http://<IP>:8080` and the IP changes when the instance is
+stopped and started, so `APP_BASE_URL` is updated with it. Check the whole path with
+one real mail, from the project root:
+
+```bash
+python backend/manage.py mail-check --to you@example.com
+```
+
+It prints the mailer (never the password) and where links will point, and needs no
+database. A failure is one line with the SMTP reply code, never the password or an
+address.
+
 ## Tests
 
 Run the backend test suite from `backend/`:
@@ -256,6 +315,15 @@ they do not require a running MySQL server.
 - User-submitted rich text is sanitized with bleach when available.
 - Links opened in a new tab are protected with `rel="noopener noreferrer"`.
 - Uploads are validated with Pillow and capped at 5 MB.
-- LLM API keys live only in `.env`. They are never logged, printed or stored, and
-  are scrubbed from provider error messages.
-- When deploying over HTTPS, add the `Secure` attribute to the session cookie.
+- LLM API keys and the SMTP password live only in `.env`. They are never logged,
+  printed or stored, and are kept out of error messages.
+- Password-reset tokens are stored only as SHA-256 hashes, work once, and expire
+  after 30 minutes (see "Password Reset").
+- **Still to do for the final production deployment: HTTPS and a `Secure` session
+  cookie.** The live site is served over plain HTTP (`http://<IP>:8080`), so the
+  `session_id` cookie is sent without the `Secure` attribute, and a password-reset
+  link crosses the network in clear text when it is opened. The hardening is: TLS in
+  nginx (a domain and a certificate, e.g. Let's Encrypt), `APP_BASE_URL` with
+  `https://`, and `secure=True` in `_set_session_cookie` and `_clear_session_cookie`
+  (for example behind a `SESSION_COOKIE_SECURE` setting, so local HTTP development
+  keeps working). Until then, the cookie is still `HttpOnly` and `SameSite=Lax`.

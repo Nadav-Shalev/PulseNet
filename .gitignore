@@ -13,6 +13,10 @@ dist/
 frontend/cypress/screenshots/
 frontend/cypress/videos/
 
+# Mail written to files (MAIL_PROVIDER=file): reset links with live tokens
+backend/outbox/
+frontend/cypress/outbox/
+
 # Env
 .env
 *.env
