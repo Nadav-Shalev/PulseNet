@@ -130,5 +130,31 @@ class ParseSchemaTests(unittest.TestCase):
         self.assertEqual(render_erd.schema_digest("a;\r\nb;\r\n"), render_erd.schema_digest("a;\nb;\n"))
 
 
+class SelfReferenceTests(unittest.TestCase):
+    """comments.parent_id points at comments: a relationship from a table to itself."""
+
+    SQL = """
+        CREATE TABLE notes (
+            id        INT AUTO_INCREMENT PRIMARY KEY,
+            parent_id INT,
+            FOREIGN KEY (parent_id) REFERENCES notes(id) ON DELETE CASCADE
+        );
+    """
+
+    def test_a_nullable_self_reference_is_an_optional_relationship_to_itself(self):
+        tables = render_erd.parse_schema(self.SQL)
+        self.assertEqual(render_erd.relationships(tables),
+                         [render_erd.Relationship("notes", "notes", "parent_id", True)])
+        self.assertIn('notes |o--o{ notes : "parent_id"', render_erd.mermaid(tables))
+
+    def test_the_loop_leaves_and_reenters_the_right_side_of_the_box(self):
+        # A line from a box to itself would have no length; the loop sits outside it.
+        (x1, y1), (x2, y2), (x3, y3), (x4, y4) = render_erd._self_loop_points((100, 50, 200, 300))
+        self.assertEqual((x1, x4), (300, 300))                  # on the right edge
+        self.assertTrue(50 < y1 < y4 < 350)                     # within the box's height
+        self.assertEqual((x2, x3), (300 + render_erd.SELF_LOOP_REACH,) * 2)
+        self.assertEqual((y2, y3), (y1, y4))
+
+
 if __name__ == "__main__":
     unittest.main()

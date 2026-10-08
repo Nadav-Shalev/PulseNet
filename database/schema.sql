@@ -85,3 +85,19 @@ CREATE TABLE IF NOT EXISTS likes (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
+
+-- A comment on a post (migration 003). parent_id is NULL for a comment on the post,
+-- else the comment it replies to; the API keeps replies one level deep. body_html is
+-- sanitized. Deleting a post, a comment or a user removes the comments under it.
+CREATE TABLE IF NOT EXISTS comments (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    post_id    INT NOT NULL,
+    author_id  INT NOT NULL,
+    parent_id  INT,
+    body_html  TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_comments_post (post_id, created_at),
+    FOREIGN KEY (post_id)   REFERENCES posts(id)    ON DELETE CASCADE,
+    FOREIGN KEY (author_id) REFERENCES users(id)    ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE CASCADE
+);
