@@ -20,10 +20,10 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-# The service logs a line per call; with no handler, logging prints warnings to
-# stderr and clutters the test output. Tests only (in production those warnings
-# should reach the server log). assertLogs still captures them.
-logging.getLogger("pulsenet.llm").addHandler(logging.NullHandler())
+# The LLM service and moderation log a line per call; with no handler, logging
+# prints warnings to stderr and clutters the test output. Tests only (in production
+# those warnings should reach the server log). assertLogs still captures them.
+logging.getLogger("pulsenet").addHandler(logging.NullHandler())
 
 
 class FakeResponse:

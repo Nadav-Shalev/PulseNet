@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import html as _html
@@ -28,6 +29,9 @@ from flask_cors import CORS
 from PIL import Image, UnidentifiedImageError
 from werkzeug.utils import secure_filename
 from mock_data import mock_get_articles, mock_get_article_by_id, mock_search_users
+
+import llm
+import moderation
 
 # ─── Rich-text sanitization (user-submitted HTML from the WYSIWYG editor) ──────
 # Whitelist only the formatting the editor can produce. bleach strips everything
@@ -197,6 +201,44 @@ def is_db_available():
         return True
     except Exception:
         return False
+
+
+# ─── LLM service and moderation ───────────────────────────────────────────────
+
+def _build_llm_service(env):
+    """The LLM service from the LLM_* settings in ``env`` (backend/llm), or None
+    when the LLM is off (LLM_PROVIDER unset) or misconfigured: every feature then
+    uses its fallback. ``connect`` is a lambda so get_db_connection is looked up at
+    each call, which is also what lets the tests patch it."""
+    try:
+        return llm.from_env(env, connect=lambda: get_db_connection())
+    except llm.LLMConfigError as exc:
+        # Unset is a choice; a set but broken setting is a mistake worth a warning.
+        # The message names a variable, never its value.
+        level = logging.WARNING if (env.get("LLM_PROVIDER") or "").strip() else logging.INFO
+        app.logger.log(level, "LLM off: %s", exc)
+        return None
+
+
+llm_service = _build_llm_service(os.environ)
+# Posts and comments are checked before they are stored (moderation.py): by the LLM
+# when it is on, else by a word list.
+moderator = moderation.Moderator(llm_service)
+
+_MODERATION_REASONS = {
+    "harassment": "insulting or harassing",
+    "hate": "hateful",
+    "threat": "threatening",
+}
+
+
+def _moderation_error(verdict, kind):
+    """The 422 for a post or comment (``kind``) that moderation blocked."""
+    reason = _MODERATION_REASONS.get(verdict.category, "toxic")
+    return jsonify({
+        "error": f"This {kind} looks {reason}, so it was not published. Please rephrase it.",
+        "category": verdict.category,
+    }), 422
 
 
 # ─── Request input: JSON type checks ─────────────────────────────────────────
@@ -777,6 +819,13 @@ def create_article():
     # Author is derived from the session, not from the request body.
     user = g.current_user
 
+    # One moderation check for the whole post, on what readers will see: the text of
+    # the sanitized HTML (also for a markdown post), never raw markup. Nothing is
+    # stored when it is blocked.
+    verdict = moderator.check_post(title, html_to_text(body_html), tags, user_id=user["id"])
+    if verdict.blocked:
+        return _moderation_error(verdict, "post")
+
     conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -1082,6 +1131,13 @@ def create_comment(post_id):
         cursor.close()
         conn.close()
         return err
+
+    # After the target checks, so a missing post is a 404 and costs no LLM call.
+    verdict = moderator.check_comment(text, user_id=g.current_user["id"])
+    if verdict.blocked:
+        cursor.close()
+        conn.close()
+        return _moderation_error(verdict, "comment")
 
     # The writer is the session user, never an id from the request body.
     cursor.execute(

@@ -13,6 +13,9 @@ It provides:
     for the duration of a test.
   * ``db_down()`` — makes every connection attempt fail, as when MySQL is
     unreachable, to exercise the mock fallback (reads) and 503 (writes).
+  * ``patch_llm(...)`` — turns the LLM on for one test, with scripted replies.
+    Otherwise it is off for the whole suite, whatever ``backend/.env`` says, so
+    moderation uses its word list and no test can reach a real provider.
 
 Why a hand-rolled fake instead of MagicMock: the endpoints issue a small, ordered
 sequence of ``execute``/``fetchone``/``fetchall`` calls, and several open more
@@ -36,8 +39,15 @@ for _p in (_BACKEND_DIR, _TESTS_DIR):
         sys.path.insert(0, str(_p))
 
 import app  # noqa: E402  (must follow the sys.path bootstrap above)
+from llm import LLMService, MemoryUsageStore  # noqa: E402
+from llm_support import ScriptedProvider  # noqa: E402
 
 flask_app = app.app
+
+# The LLM is off for the suite (LLM_PROVIDER in backend/.env is ignored here): a
+# test that needs it turns it on with patch_llm().
+app.llm_service = None
+app.moderator = app.moderation.Moderator(None)
 
 
 def client():
@@ -171,3 +181,24 @@ def db_down():
     with patch.object(app, "get_db_connection", side_effect=error), \
          patch.object(app, "is_db_available", return_value=False):
         yield
+
+
+@contextmanager
+def patch_llm(*replies, daily_limit=100, store=None):
+    """Turn the LLM on for a test: ``app.llm_service`` answers ``replies`` in order
+    (a string is returned, an exception raised) and logs to a MemoryUsageStore, and
+    ``app.moderator`` uses it, with an empty cache. Yields the service:
+    ``service.provider.calls`` holds each (prompt, system) and
+    ``service.store.records`` each usage row.
+
+    Usage::
+
+        with patch_db(conn), patch_llm('{"toxic": false, "category": "none"}') as llm:
+            resp = client().post("/api/articles/1/comments", json={...})
+        self.assertEqual(len(llm.provider.calls), 1)
+    """
+    service = LLMService(ScriptedProvider(*replies),
+                         store if store is not None else MemoryUsageStore(),
+                         daily_limit=daily_limit)
+    with patch.object(app, "llm_service", service),          patch.object(app, "moderator", app.moderation.Moderator(service)):
+        yield service
