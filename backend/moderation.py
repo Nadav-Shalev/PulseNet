@@ -105,6 +105,23 @@ def wordlist_verdict(text):
     return Verdict(False, "none", "wordlist")
 
 
+def post_fields(title, body_text, tags=()):
+    """A post as the fields moderation checks: title, tags, then the body last."""
+    return (("post_title", title), ("post_tags", ", ".join(tags)), ("post_body", body_text))
+
+
+def comment_fields(text):
+    return (("comment", text),)
+
+
+def prompt_for(fields):
+    """(prompt, system text) the LLM gets for ``fields``: each field in its own data
+    block, the last one cut to MAX_TEXT_CHARS. llm_replay.py records replies to
+    exactly these prompts."""
+    *head, (name, text) = fields
+    return data_blocks(*head, (name, text[:MAX_TEXT_CHARS])), SYSTEM
+
+
 def parse_verdict(reply):
     """The LLM's reply as a Verdict. Only {"toxic": false, "category": "none"} or
     {"toxic": true, "category": <one of CATEGORIES>} pass; anything else is
@@ -133,12 +150,11 @@ class Moderator:
     def check_post(self, title, body_text, tags=(), *, user_id=None):
         """One verdict for a whole post. ``body_text`` is its visible text (the
         HTML's text), never raw HTML; ``tags`` are its tag names."""
-        return self._check((("post_title", title), ("post_tags", ", ".join(tags)),
-                            ("post_body", body_text)), user_id)
+        return self._check(post_fields(title, body_text, tags), user_id)
 
     def check_comment(self, text, *, user_id=None):
         """The verdict on a comment's visible text."""
-        return self._check((("comment", text),), user_id)
+        return self._check(comment_fields(text), user_id)
 
     def _check(self, fields, user_id):
         key = _cache_key(fields)
@@ -163,10 +179,9 @@ class Moderator:
         """The LLM's verdict, or None when there is none to be had."""
         if self.service is None:
             return None
-        *head, (name, text) = fields
-        prompt = data_blocks(*head, (name, text[:MAX_TEXT_CHARS]))
+        prompt, system = prompt_for(fields)
         try:
-            reply = self.service.complete(prompt, system=SYSTEM, purpose="moderation",
+            reply = self.service.complete(prompt, system=system, purpose="moderation",
                                           user_id=user_id)
             return parse_verdict(reply)
         except LLMBadReply:

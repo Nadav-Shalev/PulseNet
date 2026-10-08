@@ -1,0 +1,10 @@
+{
+  "case": "suggest_post",
+  "purpose": "ai_suggest_post",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 2421,
+  "prompt_sha256": "d909fb7f5e372ac17b3c26a8c72bd615d9267d5a7f88fb989c5507b36af4b5b0",
+  "reply": "Hey fellow developers,\n\nI recently made a switch from REST polling to WebSockets in my projects, and I wanted to share why it was a game-changer for me. **WebSockets** offer real-time, two-way communication, which is a huge improvement over REST polling.\n\nHere’s why I made the switch:\n\n- **Efficiency**: With REST polling, you constantly make repeated HTTP requests to the server to check for updates, which can be resource-intensive and slow. WebSockets, on the other hand, establish a persistent connection and allow the server to push updates to the client immediately.\n- **Reduced Latency**: Since WebSockets maintain an open connection, there’s no need for the overhead of setting up new connections, which means lower latency and faster data transmission.\n- **Better User Experience**: Real-time updates mean that users get the most up-to-date information instantly, leading to a smoother and more responsive experience.\n\nHere are some **JavaScript** libraries that make working with WebSockets easier:\n\n- **Socket.IO**: A versatile library for real-time web applications.\n- **WebSockets API**: The native WebSocket API for a more lightweight approach.\n\nIf you’re curious about implementing WebSockets in your project, check out these resources:\n\n- [WebSockets MDN Guide](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)\n-"
+}

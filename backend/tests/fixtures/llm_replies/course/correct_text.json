@@ -1,0 +1,10 @@
+{
+  "case": "correct_text",
+  "purpose": "ai_correct",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 863,
+  "prompt_sha256": "e4361acf098263a68d30cd3c6acc3f15f13f93ce0e42d4d4a89a54e102f09540",
+  "reply": "I think this approach doesn't scale, because every request opens a new connection to the database."
+}

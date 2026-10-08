@@ -1,0 +1,10 @@
+{
+  "case": "suggest_comment",
+  "purpose": "ai_suggest_comment",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 1236,
+  "prompt_sha256": "1ea65ee21c8401aafe68f6023cb6c0d367249c4b256b2773dd06237fed18b5ca",
+  "reply": "Dana, it does matter even if they run on the same machine. The proxy headers help Flask to correctly interpret the client's IP address, especially in scenarios where there are multiple layers of proxies or when using features like HTTPS."
+}

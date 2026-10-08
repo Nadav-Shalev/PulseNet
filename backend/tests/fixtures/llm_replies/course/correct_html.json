@@ -1,0 +1,10 @@
+{
+  "case": "correct_html",
+  "purpose": "ai_correct",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 792,
+  "prompt_sha256": "019d03fc923db6063bcd5aed8ed1df9ea0f1b96390b4cd1e8959f3cc36978f97",
+  "reply": "<draft>\n<p>This is <strong>really</strong> useful, thank you for sharing it with the community.</p>\n</draft>"
+}

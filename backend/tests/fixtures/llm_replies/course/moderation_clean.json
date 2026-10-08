@@ -1,0 +1,10 @@
+{
+  "case": "moderation_clean",
+  "purpose": "moderation",
+  "provider": "course",
+  "model": null,
+  "recorded_on": "2026-10-08",
+  "latency_ms": 1709,
+  "prompt_sha256": "0030cfad8b204666d9bf5fd0b2dba6b0fee35fe1bc5b882f1eca648c08040f3f",
+  "reply": "{\n  \"toxic\": false,\n  \"category\": \"none\"\n}"
+}
