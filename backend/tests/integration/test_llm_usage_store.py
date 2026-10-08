@@ -61,6 +61,36 @@ class DbUsageStoreTests(unittest.TestCase):
     def test_count_of_no_row_is_zero(self):
         self.assertEqual(self.store(FakeConn()).count(DAY), 0)
 
+    def test_count_for_user_reads_one_users_day_for_the_given_purposes(self):
+        conn = FakeConn(fetchone=[(3,)])
+
+        count = self.store(conn).count_for_user(DAY, 42, ["ai_correct", "ai_suggest_post"])
+
+        self.assertEqual(count, 3)
+        sql, params = conn.find("select count(*) from llm_usage")[0]
+        self.assertIn("WHERE user_id = %s AND usage_day = %s AND status <> 'over_limit' "
+                      "AND purpose IN (%s, %s)", " ".join(sql.split()))
+        self.assertEqual(params, (42, DAY, "ai_correct", "ai_suggest_post"))
+        self.assertTrue(conn.closed)
+        self.assertEqual(conn.commits, 0)
+
+    def test_count_for_user_has_one_placeholder_per_purpose(self):
+        conn = FakeConn(fetchone=[(0,)])
+
+        self.assertEqual(self.store(conn).count_for_user(DAY, 1, ("ai_correct",)), 0)
+
+        sql, params = conn.find("select count(*) from llm_usage")[0]
+        self.assertIn("purpose IN (%s)", " ".join(sql.split()))
+        self.assertEqual(params, (1, DAY, "ai_correct"))
+
+    def test_count_for_user_without_purposes_is_refused_before_connecting(self):
+        store = self.store()
+        for empty in ([], ()):
+            with self.subTest(purposes=empty):
+                with self.assertRaisesRegex(ValueError, "at least one purpose"):
+                    store.count_for_user(DAY, 1, empty)
+        self.assertEqual(self.connects, 0)
+
     def test_record_inserts_every_column_in_order_and_commits(self):
         conn = FakeConn()
 
@@ -85,12 +115,16 @@ class DbUsageStoreTests(unittest.TestCase):
         self.assertTrue(first.closed and second.closed)
 
     def test_the_connection_is_closed_when_a_query_fails(self):
-        for operation in ("count", "record"):
+        calls = {
+            "count": lambda store: store.count(DAY),
+            "count_for_user": lambda store: store.count_for_user(DAY, 1, ["ai_correct"]),
+            "record": lambda store: store.record(ENTRY),
+        }
+        for operation, call in calls.items():
             with self.subTest(operation=operation):
                 conn = FailingCursorConn()
-                store = self.store(conn)
                 with self.assertRaisesRegex(RuntimeError, "1146"):
-                    getattr(store, operation)(DAY if operation == "count" else ENTRY)
+                    call(self.store(conn))
                 self.assertTrue(conn.closed)
                 self.assertEqual(conn.commits, 0)
 
@@ -103,6 +137,16 @@ class MemoryUsageStoreTests(unittest.TestCase):
 
         self.assertEqual(store.count(DAY), 2)
         self.assertEqual(len(store.records), 4)
+
+    def test_counts_one_users_purposes_without_refused_calls(self):
+        store = MemoryUsageStore()
+        for user_id, purpose, status in [(42, "ai_correct", "ok"), (42, "ai_correct", "over_limit"),
+                                         (42, "moderation", "ok"), (7, "ai_correct", "ok")]:
+            store.record(ENTRY._replace(user_id=user_id, purpose=purpose, status=status))
+
+        self.assertEqual(store.count_for_user(DAY, 42, ["ai_correct"]), 1)
+        with self.assertRaises(ValueError):
+            store.count_for_user(DAY, 42, [])
 
 
 if __name__ == "__main__":
