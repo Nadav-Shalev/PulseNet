@@ -79,6 +79,8 @@ The API runs at `http://localhost:5000`.
 - Read endpoints can fall back to `mock_data.py` when the database is unavailable.
 - Write endpoints require the database and return an error if it is unavailable.
 - Uploaded images are stored in `backend/uploads/` and served from `/uploads/<filename>`.
+  `POST /api/upload` answers that path as a relative URL, so the page loads it from its
+  own origin: nginx proxies `/uploads` on the EC2, the Vite dev server does locally.
 
 Request helpers and frontend API shapes are documented in
 `../frontend/src/api/README.md`.

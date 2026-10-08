@@ -1721,7 +1721,11 @@ def upload_image():
     with open(path, "wb") as saved:
         saved.write(data)
 
-    url = request.host_url.rstrip("/") + f"/uploads/{fname}"
+    # A relative URL: the browser resolves it against the page's own origin. Behind
+    # nginx on the EC2, request.host_url lost the :8080 (Host $host carries no port)
+    # and baked in an IP that changes on every restart. nginx proxies /uploads to
+    # this app; in development the Vite dev server does (vite.config.js).
+    url = f"/uploads/{fname}"
     return jsonify({"url": url}), 201
 
 
