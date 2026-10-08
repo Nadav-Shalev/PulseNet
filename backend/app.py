@@ -285,7 +285,8 @@ SESSION_MAX_AGE_SECONDS = SESSION_DURATION_DAYS * 24 * 60 * 60  # 604800
 def _user_shape(row):
     """The logged-in user's own record (/api/me, login, signup). It is the only
     JSON that carries an email, so never use it for another user's data. Must
-    NEVER include password_hash."""
+    NEVER include password_hash. ``role`` only tells the UI whether to show the
+    admin page: every admin endpoint checks the role again on the server."""
     return {
         "id":            row["id"],
         "name":          row.get("name"),
@@ -294,6 +295,7 @@ def _user_shape(row):
         "bio":           row.get("bio"),
         "avatar":        row.get("avatar"),
         "profile_image": row.get("profile_image"),
+        "role":          row.get("role") or "user",
     }
 
 
@@ -397,7 +399,8 @@ def _clear_session_cookie(resp):
 def require_session(view):
     """Gate write endpoints. Looks up the cookie's session_id and stashes the
     matching user (with their role) on ``g.current_user``; 401 if
-    missing/expired/invalid."""
+    missing/expired/invalid, or if the user is banned (a ban deletes their
+    sessions too; the filter is the second lock)."""
     @wraps(view)
     def wrapped(*args, **kwargs):
         sid = request.cookies.get(SESSION_COOKIE_NAME)
@@ -414,7 +417,7 @@ def require_session(view):
                        u.avatar, u.profile_image, u.role
                 FROM sessions s
                 JOIN users u ON u.id = s.user_id
-                WHERE s.session_id = %s AND s.expires_at > NOW()
+                WHERE s.session_id = %s AND s.expires_at > NOW() AND NOT u.is_banned
                 """,
                 (sid,),
             )
@@ -461,7 +464,7 @@ def _current_user_from_cookie():
         cursor.execute(
             "SELECT u.id, u.username FROM sessions s "
             "JOIN users u ON u.id = s.user_id "
-            "WHERE s.session_id = %s AND s.expires_at > NOW()",
+            "WHERE s.session_id = %s AND s.expires_at > NOW() AND NOT u.is_banned",
             (sid,),
         )
         user = cursor.fetchone()
@@ -1190,6 +1193,96 @@ def delete_comment(comment_id):
     return jsonify({"deleted": True, "id": comment_id, "comment_count": comment_count})
 
 
+# ─── Admin: users (find, ban, unban) ──────────────────────────────────────────
+# A ban only shuts the account out (login and every session); the user's posts and
+# comments stay until an admin deletes them, and reports about them stay open.
+
+ADMIN_USER_LIMIT = 20
+
+
+def _admin_user_shape(row):
+    """A user as the admin page lists it: no email, like every other user list."""
+    return {
+        "id":        row["id"],
+        "username":  row["username"],
+        "name":      row.get("name"),
+        "role":      row.get("role") or "user",
+        "is_banned": bool(row.get("is_banned")),
+    }
+
+
+@app.route("/api/admin/users")
+@require_admin
+def admin_list_users():
+    """Up to ADMIN_USER_LIMIT users by username: those matching ``q`` (username or
+    name, never email), or only the banned ones with ``banned=1``."""
+    q = (request.args.get("q") or "").strip()
+    banned_only = request.args.get("banned") == "1"
+    # The conditions are fixed strings; only the values come from the request.
+    where, params = [], []
+    if q:
+        where.append("(username LIKE %s OR name LIKE %s)")
+        params += [f"%{q}%"] * 2
+    if banned_only:
+        where.append("is_banned")
+    sql = "SELECT id, username, name, role, is_banned FROM users"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(sql + " ORDER BY username LIMIT %s", params + [ADMIN_USER_LIMIT])
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+    return jsonify([_admin_user_shape(row) for row in rows])
+
+
+def _set_banned(user_id, banned):
+    """Shared body of ban / unban. A ban also deletes every session of the user, in
+    the same transaction, so they are logged out everywhere at once."""
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+    if banned and user_id == g.current_user["id"]:
+        return jsonify({"error": "You cannot ban yourself"}), 400
+
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id, username, name, role, is_banned FROM users WHERE id = %s", (user_id,))
+    user = cursor.fetchone()
+    if user is None:
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+    # One admin cannot lock another out; a role change is a job for manage.py.
+    if banned and user.get("role") == "admin":
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "An admin cannot be banned"}), 403
+
+    cursor.execute("UPDATE users SET is_banned = %s WHERE id = %s", (banned, user_id))
+    if banned:
+        cursor.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify(_admin_user_shape({**user, "is_banned": banned}))
+
+
+@app.route("/api/admin/users/<int:user_id>/ban", methods=["POST"])
+@require_admin
+def ban_user(user_id):
+    return _set_banned(user_id, True)
+
+
+@app.route("/api/admin/users/<int:user_id>/ban", methods=["DELETE"])
+@require_admin
+def unban_user(user_id):
+    return _set_banned(user_id, False)
+
+
 # ─── AI assistance: correct a draft, draft a post, propose a comment ──────────
 # Suggestions only: nothing is stored, and whatever the user publishes from them
 # goes through moderation like anything else. The prompts live in ai_assist.py.
@@ -1473,6 +1566,7 @@ def create_user():
         "bio":           bio,
         "avatar":        avatar,
         "profile_image": avatar,
+        "role":          "user",          # the column default: signup never sets a role
     }
     resp = make_response(jsonify(user_payload), 201)
     return _set_session_cookie(resp, session_id)
@@ -1494,8 +1588,8 @@ def login():
     conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
-        "SELECT id, name, username, email, bio, avatar, profile_image, password_hash "
-        "FROM users WHERE email = %s",
+        "SELECT id, name, username, email, bio, avatar, profile_image, role, is_banned, "
+        "password_hash FROM users WHERE email = %s",
         (email,),
     )
     user = cursor.fetchone()
@@ -1510,6 +1604,12 @@ def login():
         cursor.close()
         conn.close()
         return jsonify({"error": "Invalid email or password"}), 401
+
+    # After the password check, so only the account's owner learns it is banned.
+    if user.get("is_banned"):
+        cursor.close()
+        conn.close()
+        return jsonify({"error": "This account has been suspended"}), 403
 
     session_id = _create_session(cursor, user["id"])
     conn.commit()

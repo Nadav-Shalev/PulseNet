@@ -21,7 +21,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
         sys.path.insert(0, str(_p))
 
 import app  # noqa: E402
-from support import FakeConn, client, patch_db  # noqa: E402
+from support import FakeConn, client, flask_app, patch_db  # noqa: E402
 
 # bcrypt hashing is deliberately slow — hash the test password once for the module.
 PASSWORD = "s3cret-pw"
@@ -192,6 +192,76 @@ class LogoutTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("session_id=;", _set_cookie_header(resp))
+
+
+class BannedUserTests(unittest.TestCase):
+    """A ban (POST /api/admin/users/<id>/ban) deletes the user's sessions; these are
+    the other two locks: login refuses them, and a session row never counts."""
+
+    def test_login_reads_role_and_ban(self):
+        conn = FakeConn(fetchone=[_login_row(role="admin", is_banned=0)])
+        with patch_db(conn):
+            resp = client().post("/api/login",
+                                 json={"email": "ada@example.com", "password": PASSWORD})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["role"], "admin")
+        self.assertNotIn("is_banned", resp.get_json())
+        sql = conn.find("from users where email")[0][0]
+        self.assertIn("role, is_banned", sql)
+
+    def test_a_banned_user_cannot_log_in(self):
+        conn = FakeConn(fetchone=[_login_row(is_banned=1)])
+        with patch_db(conn):
+            resp = client().post("/api/login",
+                                 json={"email": "ada@example.com", "password": PASSWORD})
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json(), {"error": "This account has been suspended"})
+        self.assertFalse(conn.ran("insert into sessions"))
+        self.assertNotIn("session_id=", _set_cookie_header(resp))
+        self.assertTrue(conn.closed)
+
+    def test_a_wrong_password_on_a_banned_account_is_still_401(self):
+        # Only the owner of the password learns that the account is banned.
+        conn = FakeConn(fetchone=[_login_row(is_banned=1)])
+        with patch_db(conn):
+            resp = client().post("/api/login",
+                                 json={"email": "ada@example.com", "password": "wrong"})
+
+        self.assertEqual(resp.status_code, 401)
+
+    def test_require_session_skips_banned_users(self):
+        conn = FakeConn(fetchone=[_session_user()])
+        c = client()
+        c.set_cookie("session_id", "valid-sid")
+        with patch_db(conn):
+            c.get("/api/me")
+
+        sql = " ".join(conn.find("from sessions s join users u")[0][0].split())
+        self.assertIn("AND NOT u.is_banned", sql)
+
+    def test_the_optional_viewer_skips_banned_users(self):
+        conn = FakeConn(fetchone=[{"id": 42, "username": "ada"}])
+        with patch_db(conn), flask_app.test_request_context(
+                "/api/articles", headers={"Cookie": "session_id=valid-sid"}):
+            self.assertEqual(app._current_user_from_cookie(), {"id": 42, "username": "ada"})
+
+        sql = " ".join(conn.find("from sessions s join users u")[0][0].split())
+        self.assertIn("AND NOT u.is_banned", sql)
+
+
+class MeRoleTests(unittest.TestCase):
+    def test_me_carries_the_role(self):
+        for role in ("user", "admin"):
+            with self.subTest(role=role):
+                conn = FakeConn(fetchone=[_session_user(role=role)])
+                c = client()
+                c.set_cookie("session_id", "valid-sid")
+                with patch_db(conn):
+                    resp = c.get("/api/me")
+
+                self.assertEqual(resp.get_json()["role"], role)
 
 
 if __name__ == "__main__":
