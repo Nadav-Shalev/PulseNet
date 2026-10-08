@@ -148,3 +148,17 @@ CREATE TABLE IF NOT EXISTS reports (
     FOREIGN KEY (comment_id)  REFERENCES comments(id) ON DELETE CASCADE,
     FOREIGN KEY (resolved_by) REFERENCES users(id)    ON DELETE SET NULL
 );
+
+-- A "forgot password" link (migration 006). Only the SHA-256 of the link's token is
+-- stored: the token itself is in the email alone. A link works once, for 30 minutes;
+-- a reset marks every open link of the user as used. Deleting a user removes them.
+CREATE TABLE IF NOT EXISTS password_resets (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    user_id    INT NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    used_at    TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_password_resets_user (user_id, created_at),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

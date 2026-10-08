@@ -8,7 +8,9 @@ the call and after it). llm-check never touches the network: the fake provider, 
 """
 
 import io
+import json
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -24,6 +26,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import mailer  # noqa: E402
 import manage  # noqa: E402
 from llm_support import FakeResponse  # noqa: E402
 from support import FakeConn  # noqa: E402
@@ -262,6 +265,75 @@ class LlmCheckTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         printed = raw.getvalue().decode("cp1252")
         self.assertIn("(fake reply) hi \\U0001f44b \\u05e9\\u05dc\\u05d5\\u05dd", printed)
+
+
+
+class MailCheckTests(unittest.TestCase):
+    def run_main(self, argv, env):
+        """Run ``manage.main(argv)``; returns (code, stdout, stderr). No DB seam: the
+        command must not connect."""
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(manage, "connect", side_effect=AssertionError("mail-check connected")), \
+             patch.object(manage, "load_dotenv"), \
+             patch.dict(manage.os.environ, env, clear=True), \
+             redirect_stdout(out), redirect_stderr(err):
+            code = manage.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_file_mail_is_written_and_needs_no_database(self):
+        with tempfile.TemporaryDirectory() as outbox:
+            code, out, err = self.run_main(["mail-check", "--to", "ops@example.com"],
+                                           {"MAIL_PROVIDER": "file", "MAIL_OUTBOX_DIR": outbox})
+
+            self.assertEqual(code, 0, err)
+            files = list(Path(outbox).glob("*.json"))
+            self.assertEqual(len(files), 1)
+            mail = json.loads(files[0].read_text(encoding="utf-8"))
+        self.assertEqual(mail["to"], "ops@example.com")
+        self.assertEqual(mail["subject"], "PulseNet mail check")
+        self.assertIn("http://localhost:5173", mail["text"])
+        self.assertEqual(out.splitlines(), [
+            f"manage: mail file outbox at {outbox}",
+            "manage: reset links point to http://localhost:5173",
+            "manage: sent a test mail to ops@example.com",
+        ])
+
+    def test_smtp_settings_are_shown_without_the_password(self):
+        env = {"MAIL_PROVIDER": "smtp", "SMTP_HOST": "smtp.gmail.com", "SMTP_USER": "bot@example.test",
+               "SMTP_PASSWORD": "secret-app-pass", "APP_BASE_URL": "http://63.179.249.8:8080"}
+        with patch.object(mailer.SmtpMailer, "send") as send:
+            code, out, err = self.run_main(["mail-check", "--to", "ops@example.com"], env)
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(send.call_args.args[0].to, "ops@example.com")
+        self.assertIn("manage: mail smtp smtp.gmail.com:587 as bot@example.test", out)
+        self.assertIn("manage: reset links point to http://63.179.249.8:8080", out)
+        self.assertNotIn("secret-app-pass", out + err)
+
+    def test_mail_off_or_broken_exits_2(self):
+        for env, needle in (({}, "MAIL_PROVIDER is not set"),
+                            ({"MAIL_PROVIDER": "smtp", "SMTP_HOST": "h", "SMTP_USER": "u",
+                              "SMTP_PASSWORD": "p"}, "APP_BASE_URL is not set")):
+            with self.subTest(needle=needle):
+                code, _out, err = self.run_main(["mail-check", "--to", "ops@example.com"], env)
+                self.assertEqual(code, 2)
+                self.assertIn(needle, err)
+
+    def test_a_failed_send_exits_1(self):
+        env = {"MAIL_PROVIDER": "smtp", "SMTP_HOST": "smtp.gmail.com", "SMTP_USER": "bot@example.test",
+               "SMTP_PASSWORD": "secret-app-pass", "APP_BASE_URL": "http://63.179.249.8:8080"}
+        failure = mailer.MailError("smtp: SMTPAuthenticationError 535")
+        with patch.object(mailer.SmtpMailer, "send", side_effect=failure):
+            code, _out, err = self.run_main(["mail-check", "--to", "ops@example.com"], env)
+
+        self.assertEqual(code, 1)
+        self.assertIn("manage: MAIL FAILED: smtp: SMTPAuthenticationError 535", err)
+
+    def test_an_address_is_required(self):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+            manage.main(["mail-check"])
+
+        self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":

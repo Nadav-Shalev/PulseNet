@@ -3,6 +3,7 @@
     python backend/manage.py make-admin <username> --dry-run   # show what would change
     python backend/manage.py make-admin <username>             # give the user the admin role
     python backend/manage.py llm-check [--prompt TEXT]         # one real call through the LLM service
+    python backend/manage.py mail-check --to ADDRESS           # one real mail through the mailer
 
 The database settings come from backend/.env (DB_HOST, DB_USER, DB_PASSWORD,
 DB_NAME); real environment variables win over it. Every command first prints which
@@ -16,6 +17,10 @@ llm-check sends one prompt through the LLM service with the LLM_* settings (see
 backend/llm/config.py) and prints the provider, model and host it used (never the
 key), the reply, the time it took and today's count. The call is logged in llm_usage
 and counts against the daily limit like any other.
+
+mail-check sends one test mail with the MAIL_* / SMTP_* settings (see
+backend/mailer.py) and prints the mailer it used (never the password) and where
+reset links will point (APP_BASE_URL). It needs no database.
 """
 
 import argparse
@@ -28,6 +33,8 @@ import mysql.connector
 from dotenv import load_dotenv
 
 import llm
+import mailer
+import password_reset
 
 BACKEND_DIR = Path(__file__).resolve().parent
 ENV_FILE    = BACKEND_DIR / ".env"
@@ -92,6 +99,8 @@ def _parse_args(argv):
     check = commands.add_parser("llm-check", help="send one prompt through the LLM service")
     check.add_argument("--prompt", default=DEFAULT_CHECK_PROMPT,
                        help="what to ask (default: a one-sentence hello)")
+    mail = commands.add_parser("mail-check", help="send one test mail through the mailer")
+    mail.add_argument("--to", required=True, help="the address to send it to")
     return parser.parse_args(argv)
 
 
@@ -148,9 +157,35 @@ def _run_llm_check(args):
             conn.close()
 
 
+def _run_mail_check(args):
+    try:
+        sender = mailer.from_env(os.environ)
+        base = password_reset.base_url(os.environ)
+    except mailer.MailConfigError as exc:
+        print(f"manage: {exc}", file=sys.stderr)
+        return 2
+    print(f"manage: mail {sender.describe()}", flush=True)
+    print(f"manage: reset links point to {base}", flush=True)
+    check = mailer.Mail(
+        to=args.to,
+        subject="PulseNet mail check",
+        text=f"This is a test mail from manage.py mail-check.\n\nReset links will point to {base}.\n",
+        html=f"<p>This is a test mail from manage.py mail-check.</p><p>Reset links will point to {base}.</p>",
+    )
+    try:
+        sender.send(check)
+    except mailer.MailError as exc:
+        print(f"manage: MAIL FAILED: {exc}", file=sys.stderr)
+        return 1
+    print(f"manage: sent a test mail to {args.to}")
+    return 0
+
+
 def main(argv=None):
     args = _parse_args(argv)
     load_dotenv(ENV_FILE)  # real env vars (e.g. DB_NAME=pulsenet_e2e ...) win over .env
+    if args.command == "mail-check":
+        return _run_mail_check(args)      # no database involved
     if not os.getenv("DB_NAME"):
         print("manage: no database: set DB_NAME in backend/.env", file=sys.stderr)
         return 2

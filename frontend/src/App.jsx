@@ -8,6 +8,8 @@ import UserProfilePage from './pages/UserProfilePage';
 import TagPostsPage from './pages/TagPostsPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import NewPostPage from './pages/NewPostPage';
 import EditProfilePage from './pages/EditProfilePage';
 import AboutPage from './pages/AboutPage';
@@ -28,6 +30,8 @@ export default function App() {
             <Route path="/tag/:tagName" element={<TagPostsPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/new-post" element={<NewPostPage />} />
             <Route path="/edit-profile" element={<EditProfilePage />} />
             <Route path="/about" element={<AboutPage />} />

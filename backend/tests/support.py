@@ -16,6 +16,8 @@ It provides:
   * ``patch_llm(...)`` — turns the LLM on for one test, with scripted replies.
     Otherwise it is off for the whole suite, whatever ``backend/.env`` says, so
     moderation uses its word list and no test can reach a real provider.
+  * ``patch_mail(...)`` — turns mail on for one test, into a MemoryMailer. Mail is
+    off for the suite too, so no test writes to an outbox or reaches an SMTP server.
 
 Why a hand-rolled fake instead of MagicMock: the endpoints issue a small, ordered
 sequence of ``execute``/``fetchone``/``fetchall`` calls, and several open more
@@ -41,6 +43,7 @@ for _p in (_BACKEND_DIR, _TESTS_DIR):
 import app  # noqa: E402  (must follow the sys.path bootstrap above)
 from llm import LLMService, MemoryUsageStore  # noqa: E402
 from llm_support import ScriptedProvider  # noqa: E402
+from mailer import MemoryMailer  # noqa: E402
 
 flask_app = app.app
 
@@ -48,6 +51,10 @@ flask_app = app.app
 # test that needs it turns it on with patch_llm().
 app.llm_service = None
 app.moderator = app.moderation.Moderator(None)
+# Mail is off for the suite as well (MAIL_PROVIDER in backend/.env is ignored):
+# patch_mail() turns it on.
+app.mail_service = None
+app.reset_base_url = None
 
 
 def client():
@@ -211,5 +218,24 @@ def patch_llm(*replies, daily_limit=100, store=None):
     service = LLMService(ScriptedProvider(*replies),
                          store if store is not None else MemoryUsageStore(),
                          daily_limit=daily_limit)
-    with patch.object(app, "llm_service", service),          patch.object(app, "moderator", app.moderation.Moderator(service)):
+    with patch.object(app, "llm_service", service), \
+         patch.object(app, "moderator", app.moderation.Moderator(service)):
         yield service
+
+
+@contextmanager
+def patch_mail(mailer=None, base_url="http://localhost:5173"):
+    """Turn mail on for a test: ``app.mail_service`` is ``mailer`` (default a new
+    MemoryMailer, whose ``sent`` holds each Mail) and the links in mails start with
+    ``base_url``. Yields the mailer.
+
+    Usage::
+
+        with patch_db(conn), patch_mail() as mail:
+            resp = client().post("/api/password/forgot", json={"email": "ada@example.com"})
+        self.assertEqual(len(mail.sent), 1)
+    """
+    mailer = mailer if mailer is not None else MemoryMailer()
+    with patch.object(app, "mail_service", mailer), \
+         patch.object(app, "reset_base_url", base_url):
+        yield mailer

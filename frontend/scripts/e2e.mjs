@@ -1,17 +1,17 @@
 // One-command E2E run against a throwaway stack, so Cypress never touches the dev DB:
 //   1. rebuild the `pulsenet_e2e` database from the migrations (backend/migrate.py --reset)
-//   2. start the backend on it, with the fake LLM and file mail providers
+//   2. start the backend on it, with the fake LLM, and mail written to cypress/outbox/
 //   3. start the Vite dev server
 //   4. run Cypress through scripts/run-cypress.mjs, forwarding any extra args
 //   5. stop both servers and exit with Cypress's result
 //
 // Usage: npm run test:e2e [-- --spec cypress/e2e/auth_flow.cy.js]
 // Needs MySQL running with the credentials in backend/.env, and ports 5000 / 5173 free.
-// Server output goes to cypress/logs/{backend,vite}.log (git-ignored).
+// Server output goes to cypress/logs/{backend,vite}.log, mail to cypress/outbox/ (both git-ignored).
 // Env overrides: PYTHON (interpreter, default python / python3), E2E_BACKEND_HOST (default ::1).
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 const FRONTEND_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BACKEND_DIR = path.resolve(FRONTEND_DIR, '..', 'backend');
 const LOG_DIR = path.join(FRONTEND_DIR, 'cypress', 'logs');
+// Mail from this run (MAIL_PROVIDER=file): emptied first, so a spec only ever reads its own.
+const OUTBOX_DIR = path.join(FRONTEND_DIR, 'cypress', 'outbox');
 
 const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const E2E_DB = 'pulsenet_e2e';
@@ -115,6 +117,8 @@ async function main() {
   if (migrate.status !== 0) throw new Error(`migrate.py failed (exit ${migrate.status})`);
 
   mkdirSync(LOG_DIR, { recursive: true });
+  rmSync(OUTBOX_DIR, { recursive: true, force: true });
+  mkdirSync(OUTBOX_DIR, { recursive: true });
   log(`starting backend on [${BACKEND_HOST}]:${BACKEND_PORT} and Vite on :${VITE_PORT} (logs: cypress/logs/)`);
   const backend = startServer('backend', PYTHON, [
     '-m', 'flask', '--app', 'app', 'run', '--host', BACKEND_HOST, '--port', String(BACKEND_PORT),
@@ -130,7 +134,9 @@ async function main() {
       // AI requests per user per day: low, so ai_assist.cy.js reaches the limit in
       // a few calls. Every spec signs up fresh users, who start at zero.
       AI_USER_DAILY_LIMIT: '5',
-      MAIL_PROVIDER: 'file', // mails written to disk, never sent (mail service, later sessions)
+      MAIL_PROVIDER: 'file', // mails written to disk as JSON, never sent (backend/mailer.py)
+      MAIL_OUTBOX_DIR: OUTBOX_DIR,
+      APP_BASE_URL: `http://localhost:${VITE_PORT}`, // where the reset links in those mails point
       PYTHONUNBUFFERED: '1',
     },
   });
@@ -155,6 +161,8 @@ async function main() {
   // Cypress inherits this: its makeAdmin task (cypress.config.js) promotes users
   // with manage.py on this database, and refuses any database not named *_e2e.
   process.env.E2E_DB_NAME = E2E_DB;
+  // ...and its lastMail task reads the mails the backend wrote here.
+  process.env.E2E_MAIL_OUTBOX = OUTBOX_DIR;
   return runNode([path.join(FRONTEND_DIR, 'scripts', 'run-cypress.mjs'), 'run', ...process.argv.slice(2)]);
 }
 

@@ -32,7 +32,9 @@ from mock_data import mock_get_articles, mock_get_article_by_id, mock_search_use
 
 import ai_assist
 import llm
+import mailer
 import moderation
+import password_reset
 
 # ─── Rich-text sanitization (user-submitted HTML from the WYSIWYG editor) ──────
 # Whitelist only the formatting the editor can produce. bleach strips everything
@@ -226,6 +228,25 @@ llm_service = _build_llm_service(os.environ)
 # when it is on, else by a word list.
 moderator = moderation.Moderator(llm_service)
 
+
+# ─── Mail (the password-reset link) ───────────────────────────────────────────
+
+def _build_mailer(env):
+    """(mailer, base URL of the links in mails) from the MAIL_* / SMTP_* settings
+    and APP_BASE_URL (mailer.py, password_reset.py), or (None, None) when mail is
+    off (MAIL_PROVIDER unset) or misconfigured: the password reset then answers 503."""
+    try:
+        return mailer.from_env(env), password_reset.base_url(env)
+    except mailer.MailConfigError as exc:
+        # Like the LLM: unset is a choice, a set but broken setting is a mistake.
+        # The message names a variable, never its value.
+        level = logging.WARNING if (env.get("MAIL_PROVIDER") or "").strip() else logging.INFO
+        app.logger.log(level, "Mail off: %s", exc)
+        return None, None
+
+
+mail_service, reset_base_url = _build_mailer(os.environ)
+
 _MODERATION_REASONS = {
     "harassment": "insulting or harassing",
     "hate": "hateful",
@@ -399,7 +420,9 @@ def _create_session(cursor, user_id):
 
 
 def _set_session_cookie(resp, session_id):
-    # Secure flag is omitted in dev (HTTP localhost); add it for HTTPS prod.
+    # No Secure flag yet: the site is served over plain HTTP (dev and the EC2).
+    # Adding it with HTTPS is the final-production hardening in backend/README.md
+    # ("Security Notes").
     resp.set_cookie(
         SESSION_COOKIE_NAME, session_id,
         max_age=SESSION_MAX_AGE_SECONDS,
@@ -1858,6 +1881,147 @@ def logout():
     msg  = "Logged out from all devices" if all_devices else "Logged out"
     resp = make_response(jsonify({"message": msg}))
     return _clear_session_cookie(resp)
+
+
+# ─── Password reset: POST /api/password/forgot and /api/password/reset ────────
+# A one-time link by email (password_reset.py builds the token, link and mail).
+# Only the token's SHA-256 is stored; the link works once, for TOKEN_TTL_MINUTES.
+
+FORGOT_MESSAGE = (
+    "If an account uses that email, we sent it a link to reset the password. "
+    f"The link works for {password_reset.TOKEN_TTL_MINUTES} minutes."
+)
+RESET_LINK_INVALID = "This reset link is invalid or has expired."
+
+
+@app.route("/api/password/forgot", methods=["POST"])
+def forgot_password():
+    """Mail a reset link to the account with this email, if there is one. The
+    answer is the same 200 either way, so it cannot tell whether an address has an
+    account. At most MAX_REQUESTS_PER_HOUR links per user; agents get none (they
+    have no password and must never get one). A banned user does get one: their
+    login still answers 403."""
+    if mail_service is None:
+        return jsonify({"error": "Password reset is not available on this server."}), 503
+    data  = _json_object(request.get_json())
+    email = _str_field(data, "email")
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+    if len(email) > 100:
+        return jsonify({"error": "Email must be 100 characters or fewer"}), 400
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    user, token, token_hash = None, None, None
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Links past their expiry by a day are of no use, even to the hourly count.
+        cursor.execute("DELETE FROM password_resets WHERE expires_at < NOW() - INTERVAL 1 DAY")
+        cursor.execute("SELECT id, name, email FROM users WHERE email = %s AND NOT is_agent", (email,))
+        user = cursor.fetchone()
+        if user is not None:
+            cursor.execute(
+                "SELECT COUNT(*) AS recent FROM password_resets "
+                "WHERE user_id = %s AND created_at > NOW() - INTERVAL 1 HOUR",
+                (user["id"],),
+            )
+            if cursor.fetchone()["recent"] < password_reset.MAX_REQUESTS_PER_HOUR:
+                token, token_hash = password_reset.new_token()
+                cursor.execute(
+                    "INSERT INTO password_resets (user_id, token_hash, expires_at) "
+                    "VALUES (%s, %s, NOW() + INTERVAL %s MINUTE)",
+                    (user["id"], token_hash, password_reset.TOKEN_TTL_MINUTES),
+                )
+            else:
+                app.logger.info("password reset: user %s is over the hourly limit", user["id"])
+        # The link is stored before its mail goes out, so a mailed link always exists.
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    # The connection is closed before the send, which can take seconds.
+    if token is not None:
+        _send_reset_mail(user, token, token_hash)
+    return jsonify({"message": FORGOT_MESSAGE})
+
+
+def _send_reset_mail(user, token, token_hash):
+    """Mail the link. If the mail fails, its link is deleted: nobody received it, so
+    it must neither stay valid nor count toward the user's hourly limit. Either way
+    the request still answers 200, so a failure says nothing about the address."""
+    link = password_reset.reset_link(reset_base_url, token)
+    try:
+        mail_service.send(password_reset.reset_mail(user["email"], user["name"], link))
+        return
+    except mailer.MailError as exc:
+        # The user id, never the address; MailError messages carry no address.
+        app.logger.warning("password reset mail for user %s not sent (%s)", user["id"], exc)
+    conn = cursor = None
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM password_resets WHERE token_hash = %s", (token_hash,))
+        conn.commit()
+    except Exception as exc:
+        # It expires in TOKEN_TTL_MINUTES anyway; until then it counts toward the limit.
+        app.logger.warning("password reset link of user %s not removed after the failed mail (%s)",
+                           user["id"], type(exc).__name__)
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None:
+            conn.close()
+
+
+@app.route("/api/password/reset", methods=["POST"])
+def reset_password():
+    """Set a new password with a link from /api/password/forgot. The link is used
+    up, with every other open link of the user, and all their sessions are deleted
+    (logged out everywhere, as a ban does), in one transaction. It does not log in."""
+    data     = _json_object(request.get_json())
+    token    = _str_field(data, "token")
+    password = _str_field(data, "password", strip=False)
+    if not token or len(token) > password_reset.MAX_TOKEN_CHARS:
+        return jsonify({"error": RESET_LINK_INVALID}), 400
+    password_error = _password_error(password)
+    if password_error:
+        return jsonify({"error": password_error}), 400
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # FOR UPDATE: two requests with the same link queue here, and the second
+        # then sees used_at set. Only the hash is compared; the token is never stored.
+        cursor.execute(
+            """
+            SELECT pr.id, pr.user_id FROM password_resets pr
+            JOIN users u ON u.id = pr.user_id
+            WHERE pr.token_hash = %s AND pr.used_at IS NULL AND pr.expires_at > NOW()
+              AND NOT u.is_agent
+            FOR UPDATE
+            """,
+            (password_reset.hash_token(token),),
+        )
+        link = cursor.fetchone()
+        if link is None:
+            conn.rollback()
+            return jsonify({"error": RESET_LINK_INVALID}), 400
+        user_id = link["user_id"]
+        # bcrypt only for a real link, so guessing links costs the server nothing.
+        cursor.execute("UPDATE users SET password_hash = %s WHERE id = %s",
+                       (_hash_password(password), user_id))
+        cursor.execute("UPDATE password_resets SET used_at = NOW() "
+                       "WHERE user_id = %s AND used_at IS NULL", (user_id,))
+        cursor.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+    return jsonify({"message": "Your password was changed. Log in with the new one."})
 
 
 # ─── GET /api/me ──────────────────────────────────────────────────────────────

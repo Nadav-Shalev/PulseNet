@@ -21,7 +21,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from support import FakeConn, client, db_down, patch_db  # noqa: E402
+from support import FakeConn, client, db_down, patch_db, patch_mail  # noqa: E402
 
 import app  # noqa: E402
 
@@ -241,6 +241,31 @@ class OwnRecordKeepsEmailTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["email"], ADA_EMAIL)
+
+
+
+class PasswordResetHidesEmailTests(unittest.TestCase):
+    """"Forgot" looks the address up (like login), but answers the same words for
+    every address and never echoes one; the reset answer carries none either."""
+
+    def test_forgot_says_the_same_for_a_known_and_an_unknown_address(self):
+        answers = []
+        for rows in ([{"id": 42, "name": "Ada", "email": ADA_EMAIL}, {"recent": 0}], [None]):
+            conn = FakeConn(fetchone=rows)
+            with patch_db(conn), patch_mail():
+                resp = client().post("/api/password/forgot", json={"email": ADA_EMAIL})
+            self.assertEqual(_emails_in(resp.get_json()), [])
+            answers.append((resp.status_code, resp.get_json()))
+        self.assertEqual(answers[0], answers[1])
+
+    def test_reset_answers_without_an_email(self):
+        conn = FakeConn(fetchone=[{"id": 5, "user_id": 42}])
+        with patch_db(conn):
+            resp = client().post("/api/password/reset", json={"token": "tok", "password": "N3w-pass!"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(_emails_in(resp.get_json()), [])
+        self.assertEqual([sql for sql, _ in conn.executed if "email" in sql.lower()], [])
 
 
 class AdminResponsesHideEmailTests(unittest.TestCase):
