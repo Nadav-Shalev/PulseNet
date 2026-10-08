@@ -162,7 +162,7 @@ class PackageBoundaryTests(unittest.TestCase):
     def test_llm_imports_neither_flask_nor_the_app_nor_a_db_driver(self):
         # In a fresh interpreter: this test process has long since imported Flask.
         code = (
-            "import sys, llm, llm.config, llm.service, llm.usage, llm.providers;"
+            "import sys, llm, llm.config, llm.service, llm.usage, llm.providers, llm.parse, llm.prompt;"
             "print(','.join(sorted(m for m in ('flask', 'app', 'manage', 'mysql', 'mysql.connector')"
             " if m in sys.modules)))"
         )
