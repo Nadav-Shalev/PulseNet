@@ -12,7 +12,7 @@ skip_empty = True
 # are added and never lowered; the project requires at least 85. Kept about a point
 # below the measured total, since CI also measures on Python 3.9 and branch counts
 # can differ slightly between Python versions.
-fail_under = 97
+fail_under = 98
 # Script entry points (`python app.py`, `python seed_data.py`) are run by hand, not
 # exercised by the test suite.
 exclude_also =

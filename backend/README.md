@@ -9,7 +9,8 @@ social graph endpoints, and local image uploads for the React frontend.
 backend/
 ├── app.py
 ├── migrate.py        schema migrations (see ../database/README.md)
-├── manage.py         admin commands, e.g. make-admin
+├── manage.py         admin commands: make-admin, llm-check
+├── llm/              the LLM service: providers, daily limit, usage log
 ├── mock_data.py
 ├── seed_data.py
 ├── requirements.txt
@@ -93,6 +94,60 @@ environment variables win. Before doing anything it prints the MySQL version, ho
 and database it is about to change, but never the credentials. On the server that is
 the production database (RDS), so run it with `--dry-run` first.
 
+## LLM Service
+
+`llm/` is the one place that talks to a language model. Features call
+`service.complete(prompt, system=..., purpose=..., user_id=...)`; agents (later) use
+the same service from their own process. The package imports neither Flask nor the
+app.
+
+```text
+llm/
+├── config.py         from_env(): reads the LLM_* settings below
+├── service.py        LLMService: daily limit, usage log, errors around each call
+├── usage.py          the llm_usage table (DbUsageStore), MemoryUsageStore for tests
+├── errors.py         LLMError and its subclasses
+└── providers/        base.py (the Provider interface), fake.py, openai_compat.py, course.py
+```
+
+| `LLM_PROVIDER` | For | Settings |
+| --- | --- | --- |
+| `fake` | tests and the E2E run: canned replies, no network | none |
+| `openai_compat` | development: any OpenAI-compatible chat API (Gemini in Google AI Studio, Groq, Ollama) | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` |
+| `course` | the final submission: the course endpoint (same contract as the class demo) | `LLM_API_URL`, `LLM_API_KEY` |
+
+Unset `LLM_PROVIDER` means the LLM is off, so callers use their fallbacks. It is
+not `fake` by default, so production never answers with canned text by mistake.
+
+- `LLM_TIMEOUT_SECONDS` (1 to 120, default 15) is how long to wait for a reply. A web
+  request must finish within gunicorn's 30-second worker timeout, so keep it below that.
+- `LLM_DAILY_LIMIT` (default 100, 0 turns the LLM off) counts calls per UTC day,
+  across every process, in the `llm_usage` table. Keep it below the provider's free
+  quota (AI Studio shows the quota for your project).
+- **Errors:** every failure is an `LLMError`, and the caller catches it and falls back.
+  The subclasses are `LLMTimeout`, `LLMRateLimited` (the provider answered 429; it
+  carries `retry_after`), `LLMLimitReached` (our own daily limit) and `LLMConfigError`.
+  There are no retries: a retry spends the quota twice and keeps the user waiting.
+- **Usage log:** one `llm_usage` row per call, with provider, model, purpose, user,
+  status, latency and sizes. The prompt and reply text are never stored. A warning
+  line goes to the server log for every failed or refused call.
+- **The limit is soft:** the count is read before a call and the row is written when
+  the provider answers. Calls that run at the same moment all see the same count, so
+  the limit can be exceeded by up to the number of concurrent calls. That is one or
+  two today (one gunicorn worker); revisit if many agents ever call at once.
+
+To use Gemini for free: create a key in Google AI Studio and put it in
+`backend/.env` (never in git), with the `openai_compat` settings from `.env.example`.
+Then check the whole path with one real call, from the project root:
+
+```bash
+python backend/manage.py llm-check
+```
+
+It prints the database, the provider, model and host (never the key), the reply,
+the time it took and today's count. The call is logged and counts against the limit
+like any other. A wrong key, model or URL shows up as a one-line error.
+
 ## Tests
 
 Run the backend test suite from `backend/`:
@@ -111,4 +166,6 @@ they do not require a running MySQL server.
 - User-submitted rich text is sanitized with bleach when available.
 - Links opened in a new tab are protected with `rel="noopener noreferrer"`.
 - Uploads are validated with Pillow and capped at 5 MB.
+- LLM API keys live only in `.env`. They are never logged, printed or stored, and
+  are scrubbed from provider error messages.
 - When deploying over HTTPS, add the `Secure` attribute to the session cookie.

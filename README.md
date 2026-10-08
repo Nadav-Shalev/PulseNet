@@ -72,6 +72,10 @@ python backend/migrate.py
 
 See [database/README.md](database/README.md) for how migrations work.
 
+The AI features go through one LLM service (`backend/llm/`). `.env.example` sets it
+to the offline `fake` provider. For a real model, such as free Gemini, see "LLM
+Service" in [backend/README.md](backend/README.md).
+
 Start the API:
 
 ```bash
