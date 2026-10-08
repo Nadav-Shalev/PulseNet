@@ -55,3 +55,12 @@ Cypress.Commands.add('apiFollow', (userId) =>
 Cypress.Commands.add('apiLike', (postId) =>
   cy.request('POST', api(`/articles/${postId}/like`)).its('body'),
 )
+
+// Comment on a post as the logged-in user, or reply to a top-level comment.
+// Yields { comment, comment_count }.
+//   cy.apiComment(post.id, '<p>Nice</p>')
+//   cy.apiComment(post.id, '<p>Agreed</p>', comment.id)
+Cypress.Commands.add('apiComment', (postId, bodyHtml, parentId = null) =>
+  cy.request('POST', api(`/articles/${postId}/comments`), { body_html: bodyHtml, parent_id: parentId })
+    .its('body'),
+)

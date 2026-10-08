@@ -3,13 +3,12 @@
 POST / DELETE /api/articles/<id>/like: the liker comes from the session, a missing
 post is a 404, and the reply carries the post's fresh like count. Every feed mode
 and a single article report like_count and liked_by_me for the viewer, with one
-likes query per page.
+counts query per page (shared with comment_count).
 """
 
 import sys
 import unittest
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -21,7 +20,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
 
 from support import FakeConn, client, db_down, patch_db  # noqa: E402
 
-LIKES_QUERY = "from likes where post_id in"
+COUNTS_QUERY = "from posts p where p.id in"
 VIEWER = {"id": 42, "username": "ada"}
 
 
@@ -53,9 +52,10 @@ def _post_row(**over):
     return row
 
 
-def _likes_row(post_id, like_count, liked_by_me):
-    # MySQL returns SUM() as a Decimal, or None when the viewer id is NULL.
-    return {"post_id": post_id, "like_count": like_count, "liked_by_me": liked_by_me}
+def _counts_row(post_id, like_count, liked_by_me, comment_count=0):
+    # liked_by_me is COUNT(*) of the viewer's like rows: 0 or 1 (0 for a NULL viewer).
+    return {"post_id": post_id, "like_count": like_count, "liked_by_me": liked_by_me,
+            "comment_count": comment_count}
 
 
 class LikeTests(unittest.TestCase):
@@ -140,7 +140,7 @@ class FeedLikesTests(unittest.TestCase):
         resp, conn = self._get(
             "/api/articles",
             posts=[_post_row(id=2, tag_name="react"), _post_row(id=2, tag_name="flask"), _post_row(id=1)],
-            likes=[_likes_row(2, 3, Decimal(1))],
+            likes=[_counts_row(2, 3, 1)],
             viewer=VIEWER,
         )
 
@@ -148,42 +148,42 @@ class FeedLikesTests(unittest.TestCase):
         self.assertEqual((posts[2]["like_count"], posts[2]["liked_by_me"]), (3, True))
         self.assertEqual((posts[1]["like_count"], posts[1]["liked_by_me"]), (0, False))
         # One query for the whole page: the viewer's id, then each post id once.
-        self.assertEqual(conn.params_for(LIKES_QUERY), (42, 2, 1))
-        self.assertEqual(len(conn.find(LIKES_QUERY)), 1)
+        self.assertEqual(conn.params_for(COUNTS_QUERY), (42, 2, 1))
+        self.assertEqual(len(conn.find(COUNTS_QUERY)), 1)
 
     def test_a_logged_out_visitor_sees_counts_but_never_liked_by_me(self):
-        resp, conn = self._get("/api/articles", posts=[_post_row(id=2)], likes=[_likes_row(2, 5, None)])
+        resp, conn = self._get("/api/articles", posts=[_post_row(id=2)], likes=[_counts_row(2, 5, 0)])
 
         post = resp.get_json()[0]
         self.assertEqual((post["like_count"], post["liked_by_me"]), (5, False))
-        self.assertEqual(conn.params_for(LIKES_QUERY), (None, 2))
+        self.assertEqual(conn.params_for(COUNTS_QUERY), (None, 2))
 
     def test_every_feed_mode_reports_likes(self):
         for url in ("/api/articles?username=bob", "/api/articles?tag=react", "/api/articles?feed=following"):
             with self.subTest(url=url):
                 resp, conn = self._get(url, posts=[_post_row(id=9)],
-                                       likes=[_likes_row(9, 1, Decimal(1))], viewer=VIEWER)
+                                       likes=[_counts_row(9, 1, 1)], viewer=VIEWER)
 
                 self.assertEqual(resp.status_code, 200)
                 post = resp.get_json()[0]
                 self.assertEqual((post["like_count"], post["liked_by_me"]), (1, True))
-                self.assertEqual(conn.params_for(LIKES_QUERY), (42, 9))
+                self.assertEqual(conn.params_for(COUNTS_QUERY), (42, 9))
 
-    def test_an_empty_page_skips_the_likes_query(self):
-        # "post_id IN ()" is invalid SQL.
+    def test_an_empty_page_skips_the_counts_query(self):
+        # "p.id IN ()" is invalid SQL.
         resp, conn = self._get("/api/articles?username=nobody", posts=[], likes=[])
 
         self.assertEqual(resp.get_json(), [])
-        self.assertFalse(conn.ran("from likes"))
+        self.assertFalse(conn.ran(COUNTS_QUERY))
 
     def test_single_article_reports_likes(self):
         row = _post_row(id=5, body_html="<p>hi</p>", body=None, devto_id=None)
         resp, conn = self._get("/api/articles/5", posts=[row],
-                               likes=[_likes_row(5, 2, Decimal(0))], viewer=VIEWER)
+                               likes=[_counts_row(5, 2, 0)], viewer=VIEWER)
 
         post = resp.get_json()
         self.assertEqual((post["like_count"], post["liked_by_me"]), (2, False))
-        self.assertEqual(conn.params_for(LIKES_QUERY), (42, 5))
+        self.assertEqual(conn.params_for(COUNTS_QUERY), (42, 5))
 
     def test_mock_fallback_posts_carry_the_like_fields(self):
         with db_down():

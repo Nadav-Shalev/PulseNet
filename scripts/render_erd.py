@@ -40,7 +40,7 @@ from migrate import split_sql  # noqa: E402  (comment- and quote-aware SQL split
 # Where each table goes in the picture: columns left to right, each stacked top to bottom.
 LAYOUT = [
     ["follows", "users", "sessions"],
-    ["posts", "likes"],
+    ["likes", "posts", "comments"],
     ["posts_tags"],
     ["tags"],
 ]
@@ -56,6 +56,9 @@ LABELS = {
     ("follows", "following_id"): "is followed",
     ("likes", "user_id"): "likes",
     ("likes", "post_id"): "liked by",
+    ("comments", "author_id"): "writes",
+    ("comments", "post_id"): "commented on",
+    ("comments", "parent_id"): "has replies",
 }
 
 PNG_DIGEST_KEY = "Schema-SHA256"
@@ -357,12 +360,41 @@ def _draw_table(ax, table, box):
         row_y += ROW_H
 
 
+SELF_LOOP_REACH = 46             # how far a table's loop to itself sticks out to the right
+
+
+def _self_loop_points(box):
+    """The loop of a foreign key to its own table (comments.parent_id): out of the
+    right side of ``box``, across and back in, as four (x, y) points."""
+    x, y, width, height = box
+    right, top, bottom = x + width, y + height * 0.4, y + height * 0.6
+    return [(right, top), (right + SELF_LOOP_REACH, top),
+            (right + SELF_LOOP_REACH, bottom), (right, bottom)]
+
+
+def _draw_self_loop(ax, rels, box):
+    # A straight line from the box to itself would have no length: the cardinalities
+    # and the label would land in the middle of the table.
+    points = _self_loop_points(box)
+    ax.plot([p[0] for p in points], [p[1] for p in points], color=COLOR["line"], linewidth=1.6, zorder=1)
+    card = {"ha": "center", "va": "center", "fontsize": FONT["card"], "fontweight": "bold", "zorder": 5}
+    (out_x, top), (loop_x, _), _, (_, bottom) = points
+    ax.text(out_x + 24, top - 14, "0..1" if any(rel.optional for rel in rels) else "1", **card)
+    ax.text(out_x + 24, bottom + 14, "*", **card)
+    ax.text(loop_x + 8, (top + bottom) / 2, " / ".join(rel.label for rel in rels), ha="left",
+            va="center", fontsize=FONT["label"], style="italic", color=COLOR["label"], zorder=5,
+            bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "edgecolor": "none"})
+
+
 def _draw_relationships(ax, tables, boxes):
     # Several foreign keys from one table to the same parent (follows -> users) share a line.
     grouped = {}
     for rel in relationships(tables):
         grouped.setdefault((rel.parent, rel.child), []).append(rel)
     for (parent, child), rels in grouped.items():
+        if parent == child:
+            _draw_self_loop(ax, rels, boxes[parent])
+            continue
         start = _edge_point(boxes[parent], _centre(boxes[child]))
         end = _edge_point(boxes[child], _centre(boxes[parent]))
         ax.plot([start[0], end[0]], [start[1], end[1]], color=COLOR["line"], linewidth=1.6, zorder=1)

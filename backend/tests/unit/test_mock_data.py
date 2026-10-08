@@ -28,8 +28,9 @@ class MockArticlesTests(unittest.TestCase):
         self.assertEqual(first["tag_list"], ["python", "flask", "api"])
         self.assertIn("url", first)
         self.assertNotIn("author_id", first)
-        # Same like fields as the DB feed, so the UI needs no special case.
+        # Same like and comment fields as the DB feed, so the UI needs no special case.
         self.assertEqual((first["like_count"], first["liked_by_me"]), (0, False))
+        self.assertEqual(first["comment_count"], 0)
 
     def test_tag_list_is_a_copy(self):
         mock_data.mock_get_articles()[0]["tag_list"].append("mutated")

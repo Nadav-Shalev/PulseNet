@@ -119,12 +119,73 @@ class ShapePostRowTests(unittest.TestCase):
 
         self.assertIn("seed=ada", post["user"]["profile_image"])
 
-    def test_shape_starts_with_no_likes(self):
-        # _attach_likes fills these in for the posts that have likes.
+    def test_shape_starts_with_no_likes_or_comments(self):
+        # _attach_counts fills these in from one query per page.
         post = app._shape_post_row(self._row())
 
         self.assertEqual(post["like_count"], 0)
         self.assertIs(post["liked_by_me"], False)
+        self.assertEqual(post["comment_count"], 0)
+
+
+class ShapeCommentTests(unittest.TestCase):
+    def _row(self, **over):
+        row = {
+            "id": 3, "post_id": 7, "parent_id": None, "body_html": "<p>hi</p>",
+            "created_at": datetime(2026, 10, 8, 9, 30, 0), "email": "ada@x.com",
+            "username": "ada", "name": "Ada", "avatar": "a.svg", "profile_image": "p.svg",
+        }
+        row.update(over)
+        return row
+
+    def test_shape_maps_fields_without_the_email(self):
+        comment = app._shape_comment(self._row())
+
+        self.assertEqual(comment, {
+            "id": 3, "post_id": 7, "parent_id": None, "body_html": "<p>hi</p>",
+            "created_at": "2026-10-08T09:30:00+00:00",
+            "user": {"username": "ada", "name": "Ada", "profile_image": "p.svg"},
+        })
+
+    def test_profile_image_falls_back_to_avatar_then_dicebear(self):
+        self.assertEqual(app._shape_comment(self._row(profile_image=None))["user"]["profile_image"], "a.svg")
+        fallback = app._shape_comment(self._row(profile_image=None, avatar=None))["user"]["profile_image"]
+        self.assertIn("seed=ada", fallback)
+
+    def test_body_is_sanitized(self):
+        comment = app._shape_comment(self._row(body_html='<p onclick="x()">hi</p><script>1</script>'))
+
+        self.assertEqual(comment["body_html"], "<p>hi</p>1")
+
+
+class CommentTreeTests(unittest.TestCase):
+    def _row(self, cid, parent_id=None):
+        return {"id": cid, "post_id": 7, "parent_id": parent_id, "body_html": f"<p>{cid}</p>",
+                "created_at": None, "username": "u", "name": "U", "avatar": None, "profile_image": None}
+
+    def test_replies_hang_under_their_top_level_comment_in_order(self):
+        tree = app._comment_tree([self._row(1), self._row(2), self._row(3, 1), self._row(4, 2),
+                                  self._row(5, 1)])
+
+        self.assertEqual([(c["id"], [r["id"] for r in c["replies"]]) for c in tree],
+                         [(1, [3, 5]), (2, [4])])
+
+    def test_a_reply_listed_before_its_parent_still_finds_it(self):
+        # Same-second timestamps cannot put a reply first (ties go by id), but the
+        # tree does not depend on that.
+        tree = app._comment_tree([self._row(3, 1), self._row(1)])
+
+        self.assertEqual([r["id"] for r in tree[0]["replies"]], [3])
+
+    def test_a_reply_without_a_top_level_parent_is_left_out(self):
+        # A reply to a reply (the API refuses those) or to a missing comment.
+        tree = app._comment_tree([self._row(1), self._row(2, 1), self._row(3, 2), self._row(4, 99)])
+
+        self.assertEqual([c["id"] for c in tree], [1])
+        self.assertEqual([r["id"] for r in tree[0]["replies"]], [2])
+
+    def test_no_rows_is_an_empty_tree(self):
+        self.assertEqual(app._comment_tree([]), [])
 
 
 class AggregateTagsTests(unittest.TestCase):

@@ -459,9 +459,10 @@ def _shape_post_row(row):
         "readable_publish_date": row.get("readable_publish_date") or str(row.get("created_at", ""))[:10],
         "url": row.get("devto_url"),
         "tag_list": [],
-        # Filled in by _attach_likes for posts that have likes.
+        # Filled in by _attach_counts, one query for the whole page.
         "like_count": 0,
         "liked_by_me": False,
+        "comment_count": 0,
         "user": {
             "username": row.get("username", ""),
             "name": row.get("name", ""),
@@ -483,22 +484,27 @@ def _aggregate_tags(rows):
     return list(posts.values())
 
 
-def _attach_likes(cursor, posts, viewer_id):
-    """Set like_count / liked_by_me on shaped posts with one query for the page.
+def _attach_counts(cursor, posts, viewer_id):
+    """Set like_count / liked_by_me / comment_count on shaped posts with one query
+    for the page.
 
     ``cursor`` must be a dictionary cursor. ``viewer_id`` is None for a logged-out
     visitor: ``user_id = NULL`` is never true, so liked_by_me stays False. The
-    likes are counted here rather than joined into the feed queries, which already
-    return one row per tag."""
+    counts are subqueries here rather than joins in the feed queries, which already
+    return one row per tag (and joining likes and comments would multiply them)."""
     if not posts:
-        return posts                      # "post_id IN ()" is invalid SQL
+        return posts                      # "p.id IN ()" is invalid SQL
     ids = [post["id"] for post in posts]
     # Only "%s" placeholders go into the f-string; the ids themselves are bound.
     placeholders = ", ".join(["%s"] * len(ids))
-    # user_id = %s is 1 on the viewer's own like row (at most one, by the primary key).
+    # Each subquery is an index lookup per post: idx_likes_post, the likes primary
+    # key (user_id, post_id) for the viewer's own like (0 or 1 row), idx_comments_post.
     cursor.execute(
-        "SELECT post_id, COUNT(*) AS like_count, SUM(user_id = %s) AS liked_by_me "
-        f"FROM likes WHERE post_id IN ({placeholders}) GROUP BY post_id",
+        "SELECT p.id AS post_id, "
+        "(SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS like_count, "
+        "(SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id AND l.user_id = %s) AS liked_by_me, "
+        "(SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comment_count "
+        f"FROM posts p WHERE p.id IN ({placeholders})",
         (viewer_id, *ids),
     )
     by_post = {row["post_id"]: row for row in cursor.fetchall()}
@@ -507,6 +513,7 @@ def _attach_likes(cursor, posts, viewer_id):
         if row:
             post["like_count"] = int(row["like_count"])
             post["liked_by_me"] = bool(row["liked_by_me"])
+            post["comment_count"] = int(row["comment_count"])
     return posts
 
 
@@ -631,7 +638,7 @@ def get_articles():
             )
 
         rows = cursor.fetchall()
-        posts = _attach_likes(cursor, _aggregate_tags(rows), viewer["id"] if viewer else None)
+        posts = _attach_counts(cursor, _aggregate_tags(rows), viewer["id"] if viewer else None)
         cursor.close()
         conn.close()
         return jsonify(posts)
@@ -674,7 +681,7 @@ def get_article(article_id):
             if row.get("tag_name"):
                 post["tag_list"].append(row["tag_name"])
         viewer = _current_user_from_cookie()
-        _attach_likes(cursor, [post], viewer["id"] if viewer else None)
+        _attach_counts(cursor, [post], viewer["id"] if viewer else None)
 
         body_html = rows[0].get("body_html")
         devto_id  = rows[0].get("devto_id")
@@ -809,6 +816,7 @@ def create_article():
         "tag_list": tag_list,
         "like_count": 0,
         "liked_by_me": False,
+        "comment_count": 0,
         "body_html": body_html,
         "user": {
             "username": user["username"],
@@ -935,6 +943,183 @@ def like_article(post_id):
 @require_session
 def unlike_article(post_id):
     return _set_like(post_id, False)
+
+
+# ─── Comments (replies one level deep) ────────────────────────────────────────
+
+MAX_COMMENT_CHARS = 2000    # visible text: what the comment box counts
+# Raw HTML, checked before bleach parses it. Sanitizing grows a character to at most
+# 5 ("&" -> "&amp;"), so a stored comment stays under TEXT's 64 KB.
+MAX_COMMENT_HTML = 10000
+
+_COMMENT_SELECT = """
+    SELECT c.id, c.post_id, c.parent_id, c.body_html, c.created_at,
+           u.username, u.name, u.avatar, u.profile_image
+    FROM comments c
+    JOIN users u ON u.id = c.author_id
+"""
+
+
+def _shape_comment(row):
+    """A comments row joined with its author, as the API returns it. The body is
+    sanitized again on the way out, like a post's, and the author has no email."""
+    return {
+        "id": row["id"],
+        "post_id": row["post_id"],
+        "parent_id": row.get("parent_id"),
+        "body_html": sanitize_html(row.get("body_html") or ""),
+        "created_at": _iso(row.get("created_at")),
+        "user": {
+            "username": row.get("username", ""),
+            "name": row.get("name", ""),
+            "profile_image": row.get("profile_image") or row.get("avatar") or
+                             f"{DICEBEAR_URL}?seed={row.get('username', '')}",
+        },
+    }
+
+
+def _comment_tree(rows):
+    """A post's comments as a thread: the top-level comments, each with its
+    ``replies``, both levels in the order of ``rows``. A reply whose parent is not
+    a top-level comment here is left out (the API never creates one)."""
+    comments = [_shape_comment(row) for row in rows]
+    top = {c["id"]: c for c in comments if c["parent_id"] is None}
+    for comment in top.values():
+        comment["replies"] = []
+    for comment in comments:
+        if comment["parent_id"] in top:
+            top[comment["parent_id"]]["replies"].append(comment)
+    return list(top.values())
+
+
+def _comment_count(cursor, post_id):
+    """All of the post's comments, replies included. ``cursor`` is a dictionary cursor."""
+    cursor.execute("SELECT COUNT(*) AS comment_count FROM comments WHERE post_id = %s", (post_id,))
+    return int(cursor.fetchone()["comment_count"])
+
+
+def _check_comment_target(cursor, post_id, parent_id):
+    """None when a comment may go on ``post_id``, under ``parent_id`` if one is
+    given; else the error response. The post is checked before the INSERT, whose
+    foreign-key error (1452) would otherwise be a 500."""
+    cursor.execute("SELECT id FROM posts WHERE id = %s", (post_id,))
+    if not cursor.fetchone():
+        return jsonify({"error": "Post not found"}), 404
+    if parent_id is None:
+        return None
+    cursor.execute("SELECT post_id, parent_id FROM comments WHERE id = %s", (parent_id,))
+    parent = cursor.fetchone()
+    if parent is None or parent["post_id"] != post_id:
+        return jsonify({"error": "parent_id must be a comment on this post"}), 400
+    # MySQL cannot enforce this (a CHECK may not read another row), so the API does.
+    if parent["parent_id"] is not None:
+        return jsonify({"error": "Replies are one level deep: reply to the top comment instead"}), 400
+    return None
+
+
+def _require_comment_owner(cursor, comment_id, user_id):
+    """``(comment row, None)`` when user_id wrote comment_id, else ``(None, error
+    response)``. ``cursor`` is a dictionary cursor."""
+    cursor.execute("SELECT author_id, post_id FROM comments WHERE id = %s", (comment_id,))
+    comment = cursor.fetchone()
+    if comment is None:
+        return None, (jsonify({"error": "Comment not found"}), 404)
+    if comment["author_id"] != user_id:
+        return None, (jsonify({"error": "You can only delete your own comments"}), 403)
+    return comment, None
+
+
+@app.route("/api/articles/<int:post_id>/comments")
+def get_comments(post_id):
+    """The post's comments as a tree, oldest first. There is no mock fallback: an
+    unreachable DB is a 503, since an empty list would say the post has no comments."""
+    try:
+        conn   = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id FROM posts WHERE id = %s", (post_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return jsonify({"error": "Post not found"}), 404
+        # created_at has one-second resolution; id breaks ties in insertion order.
+        cursor.execute(
+            _COMMENT_SELECT + "WHERE c.post_id = %s ORDER BY c.created_at, c.id", (post_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return jsonify(_comment_tree(rows))
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+
+
+@app.route("/api/articles/<int:post_id>/comments", methods=["POST"])
+@require_session
+def create_comment(post_id):
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    data      = _json_object(request.get_json())
+    raw_html  = _str_field(data, "body_html", strip=False)
+    parent_id = data.get("parent_id")
+    # bool is an int in Python: "parent_id": true must not mean comment 1.
+    if parent_id is not None and (isinstance(parent_id, bool) or not isinstance(parent_id, int)):
+        return jsonify({"error": "parent_id must be a comment id"}), 400
+    if len(raw_html) > MAX_COMMENT_HTML:
+        return jsonify({"error": "Comment is too long"}), 400
+    # Sanitized before it is stored (and again when it is read).
+    body_html = sanitize_html(raw_html)
+    text = html_to_text(body_html)
+    if not text:
+        return jsonify({"error": "Comment cannot be empty"}), 400
+    if len(text) > MAX_COMMENT_CHARS:
+        return jsonify({"error": f"Comment must be {MAX_COMMENT_CHARS} characters or fewer"}), 400
+
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    err = _check_comment_target(cursor, post_id, parent_id)
+    if err:
+        cursor.close()
+        conn.close()
+        return err
+
+    # The writer is the session user, never an id from the request body.
+    cursor.execute(
+        "INSERT INTO comments (post_id, author_id, parent_id, body_html) VALUES (%s, %s, %s, %s)",
+        (post_id, g.current_user["id"], parent_id, body_html),
+    )
+    comment_id = cursor.lastrowid
+    conn.commit()
+    cursor.execute(_COMMENT_SELECT + "WHERE c.id = %s", (comment_id,))
+    comment = _shape_comment(cursor.fetchone())
+    if parent_id is None:
+        comment["replies"] = []
+    comment_count = _comment_count(cursor, post_id)
+    cursor.close()
+    conn.close()
+    return jsonify({"comment": comment, "comment_count": comment_count}), 201
+
+
+@app.route("/api/comments/<int:comment_id>", methods=["DELETE"])
+@require_session
+def delete_comment(comment_id):
+    if not is_db_available():
+        return jsonify({"error": "Database unavailable. Write actions are disabled."}), 503
+
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    comment, err = _require_comment_owner(cursor, comment_id, g.current_user["id"])
+    if err:
+        cursor.close()
+        conn.close()
+        return err
+    # ON DELETE CASCADE (comments.parent_id) removes its replies with it.
+    cursor.execute("DELETE FROM comments WHERE id = %s", (comment_id,))
+    conn.commit()
+    comment_count = _comment_count(cursor, comment["post_id"])
+    cursor.close()
+    conn.close()
+    return jsonify({"deleted": True, "id": comment_id, "comment_count": comment_count})
 
 
 # ─── Image upload (local storage, no external services) ────────────────────────

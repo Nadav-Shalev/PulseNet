@@ -79,6 +79,51 @@ export const likeArticle = (postId) => setLike(postId, true);
 
 export const unlikeArticle = (postId) => setLike(postId, false);
 
+// A post's comments as a tree: top-level comments oldest first, each with its
+// `replies`. Throws on 404 / 503, so the dialog can tell "no comments" from an outage.
+export const fetchComments = async (postId) => {
+  const res = await fetch(`${BASE}/articles/${postId}/comments`, CREDS);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+// Comment on a post, or reply to a top-level comment with `parentId`. The writer
+// comes from the session cookie; the backend sanitizes `bodyHtml`. Returns
+// { comment, comment_count }.
+export const createComment = async (postId, bodyHtml, parentId = null) => {
+  const res = await fetch(`${BASE}/articles/${postId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    ...CREDS,
+    body: JSON.stringify({ body_html: bodyHtml, parent_id: parentId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+// Writer-only: delete a comment (its replies go with it). Returns
+// { deleted, id, comment_count }.
+export const deleteComment = async (commentId) => {
+  const res = await fetch(`${BASE}/comments/${commentId}`, { method: 'DELETE', ...CREDS });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
 // Paged user list for the Users page. `q` filters by username or name on the
 // backend; limit/offset drive the "first 10 + Load More" flow.
 export const fetchUsers = (q = '', limit = 10, offset = 0) =>
