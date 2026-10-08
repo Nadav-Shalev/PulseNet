@@ -286,6 +286,25 @@ A ban logs the user out everywhere and blocks their login (`403`, "This account 
 been suspended") until an unban; their content and the reports about it stay.
 `banUser` answers `400` for yourself and `403` for another admin.
 
+### `requestPasswordReset(email)` / `resetPassword(token, password)`
+
+A forgotten password, without a session. The pages are `pages/ForgotPasswordPage.jsx`
+(`/forgot-password`, linked from the login page) and `pages/ResetPasswordPage.jsx`
+(`/reset-password`, which the emailed link opens).
+
+| Function | Request | Resolves to |
+| --- | --- | --- |
+| `requestPasswordReset(email)` | `POST /api/password/forgot {email}` | `{message}`: the same words whether or not the address has an account |
+| `resetPassword(token, password)` | `POST /api/password/reset {token, password}` | `{message}` once the password is changed |
+
+The emailed link is `<site>/reset-password#token=...`. The token is in the fragment,
+which the browser never sends to a server; the reset page reads it once and removes
+it from the address bar. A link works once, for 30 minutes. A reset ends every
+session of the account and does not log in: the page sends the user to `/login`.
+`requestPasswordReset` throws with `status` `400` for a missing address and `503`
+when mail is off on the server or the database is down. `resetPassword` throws with
+`400` for a bad, used or expired link or a password over 72 bytes, and `503`.
+
 ---
 
 ## Error Responses

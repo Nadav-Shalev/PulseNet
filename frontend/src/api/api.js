@@ -351,6 +351,15 @@ export const loginUser = async (email, password) => {
   return data;
 };
 
+// Ask for a password-reset link by email. Resolves to the same { message } whether
+// or not the address has an account; throws with status 503 when mail is off.
+export const requestPasswordReset = (email) => postJson('/password/forgot', { email });
+
+// Set a new password with the token from the emailed link. Resolves to { message };
+// throws with status 400 for a bad, used or expired link. It does not log in, and
+// every session of the account is ended.
+export const resetPassword = (token, password) => postJson('/password/reset', { token, password });
+
 // allDevices=true logs out every session for the user; default = this device only.
 export const logoutUser = (allDevices = false) =>
   fetch(`${BASE}/logout`, {

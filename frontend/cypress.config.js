@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'cypress'
@@ -33,6 +34,23 @@ export default defineConfig({
             throw new Error(`make-admin failed (exit ${result.status}): ${result.stderr || result.stdout || result.error}`)
           }
           return null
+        },
+        // The newest mail the backend wrote to `to` (MAIL_PROVIDER=file, into the
+        // outbox scripts/e2e.mjs empties for each run), or null when there is none.
+        //   cy.task('lastMail', user.email).then((mail) => mail.text)
+        lastMail(to) {
+          const dir = process.env.E2E_MAIL_OUTBOX || ''
+          if (!dir) {
+            throw new Error('lastMail reads the outbox of an E2E run (E2E_MAIL_OUTBOX unset): use npm run test:e2e')
+          }
+          if (!existsSync(dir)) return null
+          // File names start with the UTC send time, so sorted means oldest first.
+          const mails = readdirSync(dir)
+            .filter((name) => name.endsWith('.json'))
+            .sort()
+            .map((name) => JSON.parse(readFileSync(path.join(dir, name), 'utf8')))
+            .filter((mail) => mail.to === to)
+          return mails.length ? mails[mails.length - 1] : null
         },
       })
     },

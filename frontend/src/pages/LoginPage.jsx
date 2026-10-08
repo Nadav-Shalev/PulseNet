@@ -1,5 +1,5 @@
 import { useState, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -8,6 +8,7 @@ import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
 import Alert from '@mui/material/Alert';
+import Link from '@mui/material/Link';
 import { UserContext } from '../context/UserContext';
 import { loginUser, fetchMe } from '../api/api';
 
@@ -19,6 +20,8 @@ export default function LoginPage() {
   const [authError, setAuthError] = useState(false);
   const { login } = useContext(UserContext);
   const navigate = useNavigate();
+  // Set by the reset page after a new password was saved.
+  const passwordReset = Boolean(useLocation().state?.passwordReset);
 
   const handleLogin = async () => {
     setError('');
@@ -54,6 +57,11 @@ export default function LoginPage() {
             Sign in to your account
           </Typography>
 
+          {passwordReset && (
+            <Alert severity="success" data-testid="login-reset-done">
+              Your password was changed. Log in with the new one.
+            </Alert>
+          )}
           {authError && (
             <Alert
               severity="error"
@@ -90,6 +98,10 @@ export default function LoginPage() {
             slotProps={{ htmlInput: { 'data-testid': 'login-password' } }}
             fullWidth
           />
+          <Link component={RouterLink} to="/forgot-password" variant="body2" data-testid="login-forgot"
+            sx={{ alignSelf: 'flex-end', mt: -1 }}>
+            Forgot password?
+          </Link>
           <Button data-testid="login-submit" variant="contained" fullWidth onClick={handleLogin} disabled={submitting}>
             {submitting ? 'Logging in...' : 'Login'}
           </Button>

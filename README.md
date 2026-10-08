@@ -80,7 +80,10 @@ list ("Moderation" in the same file). The post editor and the comment box offer 
 help (fix grammar, draft a post from its title, propose a comment) as suggestions
 to apply ("AI Assist"). Readers can report a post or a comment, and admins handle
 reports, delete content and ban users on the `/admin` page ("Reports, bans and the
-admin page"; an admin is made with `backend/manage.py make-admin`).
+admin page"; an admin is made with `backend/manage.py make-admin`). A forgotten
+password is reset with a one-time link by email ("Password Reset"): with
+`MAIL_PROVIDER=file` from `.env.example`, each mail is a JSON file in
+`backend/outbox/` and nothing is sent; production sends through SMTP.
 
 Start the API:
 
@@ -180,7 +183,9 @@ npm run test:e2e -- --spec cypress/e2e/auth_flow.cy.js  # one spec
 `scripts/e2e.mjs` rebuilds a separate `pulsenet_e2e` database with
 `backend/migrate.py --reset`, starts the backend on it (fake LLM, mail to files) and
 the Vite dev server, runs Cypress, then stops both servers. The dev database is never
-touched. Server output goes to `frontend/cypress/logs/`. Shared setup commands
+touched. Server output goes to `frontend/cypress/logs/`, and the mails the backend
+wrote to `frontend/cypress/outbox/`, where `cy.task('lastMail', address)` reads a
+reset link. Shared setup commands
 (`cy.apiSignup`, `cy.apiLogin`, `cy.apiCreatePost`) live in
 `frontend/cypress/support/commands.js`.
 
