@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "cy:open": "node scripts/run-cypress.mjs open",
     "cy:run": "node scripts/run-cypress.mjs run",
-    "test:e2e": "node scripts/e2e.mjs"
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:e2e:docker": "node scripts/e2e-docker.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

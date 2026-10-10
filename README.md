@@ -196,9 +196,10 @@ bash scripts/check.sh --e2e
 ```
 
 GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same
-checks, without E2E, on every push to `main` and every pull request. The backend
-job runs on Python 3.9 (the EC2 production runtime) and 3.13. The tests use a fake
-database connection, so CI needs no MySQL.
+checks on every push to `main` and every pull request. The backend job runs on
+Python 3.9 (the EC2 production runtime) and 3.13. The tests use a fake database
+connection, so it needs no MySQL. A third job runs the whole Cypress suite on the
+docker compose stack (`npm run test:e2e:docker`, below).
 
 The individual commands are below.
 
@@ -241,6 +242,25 @@ wrote to `frontend/cypress/outbox/`, where `cy.task('lastMail', address)` reads 
 reset link. Shared setup commands
 (`cy.apiSignup`, `cy.apiLogin`, `cy.apiCreatePost`) live in
 `frontend/cypress/support/commands.js`.
+
+The same specs against the docker compose stack, the way CI runs them (Docker,
+Python 3 and port 8080 free; no local MySQL needed):
+
+```bash
+cd frontend
+npm run test:e2e:docker                                         # all specs
+npm run test:e2e:docker -- --spec cypress/e2e/admin.cy.js       # one spec
+```
+
+`scripts/e2e-docker.mjs` first checks the Compose files with
+`scripts/compose_preflight.py --strict`. It then builds and starts a separate
+project, `pulsenet_e2e`, from `docker-compose.yml` plus `docker-compose.e2e.yml`:
+fresh MySQL 8.4 and migrations, gunicorn, and nginx with the production build on
+`http://localhost:8080`, the fake LLM, and mail to `frontend/cypress/outbox/`. After
+Cypress it saves the containers' logs to `frontend/cypress/logs/compose.log` and
+removes the project with its data (`E2E_KEEP=1` leaves it running). The stack of
+`docker compose up` is never touched. `cy.task('makeAdmin')` runs `manage.py` in
+the backend container there.
 
 Against servers you already started yourself (`python app.py`, `npm run dev`):
 

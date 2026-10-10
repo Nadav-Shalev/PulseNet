@@ -1,0 +1,36 @@
+# Overrides for the E2E run on the compose stack: frontend/scripts/e2e-docker.mjs
+# (npm run test:e2e:docker) and CI's e2e job use it on top of docker-compose.yml,
+# as a separate project (pulsenet_e2e), so the data of `docker compose up` is
+# never touched. The settings match what scripts/e2e.mjs gives the local runner.
+#
+# Fixed values, not ${...}: whatever a root .env sets (a real LLM key, say) must
+# not reach the tests. scripts/compose_preflight.py --strict checks the result.
+
+x-e2e-env: &e2e-env
+  DB_NAME: pulsenet_e2e
+  # backend/llm answers offline and the same way every time: no key, no quota.
+  LLM_PROVIDER: fake
+  LLM_BASE_URL: ""
+  LLM_MODEL: ""
+  LLM_API_KEY: ""
+  # Moderation asks the fake LLM about every post and comment the specs create.
+  LLM_DAILY_LIMIT: "1000"
+  # Low, so ai_assist.cy.js reaches the limit in a few calls.
+  AI_USER_DAILY_LIMIT: "5"
+  # Mails as JSON files in frontend/cypress/outbox/, where cy.task('lastMail') reads them.
+  MAIL_PROVIDER: file
+  MAIL_OUTBOX_DIR: /outbox
+  APP_BASE_URL: http://localhost:8080
+
+services:
+  db:
+    environment:
+      MYSQL_DATABASE: pulsenet_e2e
+  migrate:
+    environment: *e2e-env
+  backend:
+    environment: *e2e-env
+    volumes:
+      - ./frontend/cypress/outbox:/outbox
+  agents:
+    environment: *e2e-env
