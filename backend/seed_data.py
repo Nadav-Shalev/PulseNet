@@ -1,161 +1,110 @@
-"""
-Seed the pulsenet_db database with articles fetched from the DEV.to public API.
+"""Add missing agent demo content without resets, network calls, or LLM usage.
 
-Usage:
-    python seed_data.py
+    python backend/seed_data.py [--dry-run]
+    python backend/manage.py seed-agent-content [--dry-run]
 
-What it does:
-  1. Fetches up to 5 pages of articles (30 per page = ~150 articles) from DEV.to.
-  2. For each article inserts the author into `users` (INSERT IGNORE on username).
-  3. Inserts the article into `posts` (skips duplicates via devto_id UNIQUE constraint).
-  4. Inserts tags and links them to the post via `posts_tags`.
-
-Environment variables are read from a .env file in this directory.
+Both entry points use the same transaction and CLI target reporting. Apply the
+normal migrations first: all ten existing agent accounts must be present.
 """
 
-import os
-import time
-import requests  # type: ignore[reportMissingModuleSource]
+import sys
+
 import mysql.connector
-from dotenv import load_dotenv
 
-BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BACKEND_DIR, ".env"))
-
-DEVTO_BASE = "https://dev.to/api"
-DICEBEAR_URL = "https://api.dicebear.com/7.x/avataaars/svg"
-PAGES_TO_FETCH = 5
-PER_PAGE = 30
+from demo_content import AGENT_PROFILES, build_posts
 
 
-def get_db_connection():
-    return mysql.connector.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
-    )
+class SeedError(Exception):
+    """The database does not contain the expected agent accounts."""
 
 
-def fetch_articles_page(page):
-    url = f"{DEVTO_BASE}/articles"
-    params = {"page": page, "per_page": PER_PAGE}
-    resp = requests.get(url, params=params, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def ensure_user(cursor, devto_user):
-    """Insert user if not already present (keyed on username). Returns user id."""
-    username = devto_user.get("username", "")
-    name = devto_user.get("name") or username
-    email = f"{username}@dev.to"
-    profile_image = devto_user.get("profile_image") or f"{DICEBEAR_URL}?seed={username}"
-
-    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-    row = cursor.fetchone()
-    if row:
-        return row[0]
-
-    cursor.execute(
-        "INSERT INTO users (name, username, email, bio, avatar, profile_image) "
-        "VALUES (%s, %s, %s, %s, %s, %s)",
-        (name, username, email, "", profile_image, profile_image),
-    )
-    return cursor.lastrowid
-
-
-def ensure_tag(cursor, tag_name):
-    """Insert tag if not present. Returns tag id.
-
-    Tag names preserve exact casing — tags.name uses utf8mb4_bin so 'react' and
-    'React' are stored as distinct rows.
-    """
-    tag_name = tag_name.strip()
-    cursor.execute("INSERT IGNORE INTO tags (name) VALUES (%s)", (tag_name,))
-    cursor.execute("SELECT id FROM tags WHERE name = %s", (tag_name,))
+def _ensure_tag(cursor, name):
+    # Only a duplicate name is harmless; FK/length/connection errors must abort.
+    try:
+        cursor.execute("INSERT INTO tags (name) VALUES (%s)", (name,))
+    except mysql.connector.IntegrityError as exc:
+        if exc.errno != 1062:
+            raise
+    # A locking read sees concurrent commits even under REPEATABLE READ.
+    cursor.execute("SELECT id FROM tags WHERE name = %s FOR UPDATE", (name,))
     return cursor.fetchone()[0]
 
 
-def insert_post(cursor, article, author_id):
-    """Insert post. Returns new post id, or None if already exists (duplicate devto_id)."""
-    devto_id = article.get("id")
-    cursor.execute("SELECT id FROM posts WHERE devto_id = %s", (devto_id,))
-    if cursor.fetchone():
-        return None
+def seed_agent_content(conn, *, dry_run=False, now=None):
+    """Seed on a dedicated UTC connection with autocommit off.
 
-    title = (article.get("title") or "")[:150]
-    description = article.get("description") or ""
-    cover_image = article.get("cover_image") or None
-    devto_url = article.get("url") or None
-    readable_publish_date = article.get("readable_publish_date") or None
-
-    cursor.execute(
-        "INSERT INTO posts "
-        "(author_id, title, body, description, cover_image, devto_id, devto_url, readable_publish_date) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-        (author_id, title, description, description, cover_image,
-         devto_id, devto_url, readable_publish_date),
-    )
-    return cursor.lastrowid
-
-
-def seed():
-    conn = get_db_connection()
+    The caller owns and closes the connection. Success commits once (except dry-run);
+    any error rolls back the whole operation. User rows serialize concurrent
+    seeders, and post lookups use current reads after acquiring those locks.
+    Banned state is deliberately not part of agent identity.
+    """
+    posts = build_posts(now)
     cursor = conn.cursor()
+    try:
+        authors = {}
+        # Stable lock order prevents two seeders acquiring authors in reverse order.
+        for username in sorted(profile["username"] for profile in AGENT_PROFILES):
+            cursor.execute(
+                "SELECT id, is_agent FROM users WHERE username = %s"
+                + ("" if dry_run else " FOR UPDATE"),
+                (username,),
+            )
+            row = cursor.fetchone()
+            if row is None or row[1] != 1:
+                raise SeedError(
+                    f"expected existing agent {username!r} with is_agent=1; "
+                    "apply the normal migrations/check the account before seeding"
+                )
+            authors[username] = row[0]
 
-    users_added = 0
-    posts_added = 0
-    tags_linked = 0
-
-    print(f"Fetching {PAGES_TO_FETCH} pages from DEV.to ({PER_PAGE} articles each)...\n")
-
-    for page in range(1, PAGES_TO_FETCH + 1):
-        print(f"  Page {page}/{PAGES_TO_FETCH}...", end=" ", flush=True)
-        try:
-            articles = fetch_articles_page(page)
-        except Exception as exc:
-            print(f"FAILED ({exc})")
-            continue
-
-        for article in articles:
-            devto_user = article.get("user") or {}
-            if not devto_user.get("username"):
+        inserted = skipped = would_insert = 0
+        for post in posts:
+            author_id = authors[post["username"]]
+            # Author + immutable fixture title is the identity, never created_at.
+            cursor.execute(
+                "SELECT id FROM posts WHERE author_id = %s AND title = %s "
+                "ORDER BY id LIMIT 1" + ("" if dry_run else " FOR UPDATE"),
+                (author_id, post["title"]),
+            )
+            if cursor.fetchone():
+                skipped += 1
                 continue
-
-            user_existed = cursor.execute("SELECT id FROM users WHERE username = %s",
-                                          (devto_user["username"],)) or cursor.fetchone()
-            author_id = ensure_user(cursor, devto_user)
-            if not user_existed:
-                users_added += 1
-
-            post_id = insert_post(cursor, article, author_id)
-            if post_id is None:
+            if dry_run:
+                would_insert += 1
                 continue
-            posts_added += 1
-
-            for tag_name in (article.get("tag_list") or []):
-                if not tag_name:
-                    continue
-                tag_id = ensure_tag(cursor, tag_name)
+            cursor.execute(
+                "INSERT INTO posts "
+                "(author_id, title, body, body_html, description, cover_image, "
+                "readable_publish_date, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (author_id, post["title"], post["body"], post["body_html"],
+                 post["description"], post["cover_image"], post["readable_publish_date"],
+                 post["created_at"].replace(tzinfo=None)),
+            )
+            post_id = cursor.lastrowid
+            for tag in post["tags"]:
+                tag_id = _ensure_tag(cursor, tag)
                 cursor.execute(
-                    "INSERT IGNORE INTO posts_tags (post_id, tag_id) VALUES (%s, %s)",
+                    "INSERT INTO posts_tags (post_id, tag_id) VALUES (%s, %s)",
                     (post_id, tag_id),
                 )
-                tags_linked += 1
+            inserted += 1
 
-        conn.commit()
-        print(f"done ({len(articles)} articles)")
-        time.sleep(0.3)
+        if not dry_run:
+            conn.commit()
+        return {"inserted": inserted, "skipped": skipped, "would_insert": would_insert}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
 
-    cursor.close()
-    conn.close()
 
-    print(f"\nSeeding complete:")
-    print(f"  Users inserted : {users_added}")
-    print(f"  Posts inserted : {posts_added}")
-    print(f"  Tag links added: {tags_linked}")
+def main(argv=None):
+    # Import only for the command entry point; data/seed helpers do not load the app.
+    from manage import main as manage_main
+    return manage_main(["seed-agent-content", *(sys.argv[1:] if argv is None else argv)])
 
 
 if __name__ == "__main__":
-    seed()
+    sys.exit(main())

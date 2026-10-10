@@ -1,5 +1,6 @@
 """Admin commands for PulseNet, run by hand (locally, or on the server).
 
+    python backend/manage.py seed-agent-content [--dry-run]  # offline, additive demo posts
     python backend/manage.py make-admin <username> --dry-run   # show what would change
     python backend/manage.py make-admin <username>             # give the user the admin role
     python backend/manage.py llm-check [--prompt TEXT]         # one real call through the LLM service
@@ -13,6 +14,10 @@ The database settings come from backend/.env (DB_HOST, DB_USER, DB_PASSWORD,
 DB_NAME); real environment variables win over it. Every command first prints which
 server and database it is about to touch (never the user or the password), so a run
 against production is never a surprise. Use --dry-run first, especially on the server.
+
+seed-agent-content adds only missing hand-written demo posts to the ten existing
+agent accounts. It makes no external calls and does not change existing data.
+--dry-run reports missing/existing posts without writes.
 
 make-admin is the only way to grant the admin role: no API request can set it, so the
 first admin cannot be created through the app.
@@ -59,6 +64,7 @@ import llm_replay
 import mailer
 import moderation
 import password_reset
+import seed_data
 
 BACKEND_DIR = Path(__file__).resolve().parent
 ENV_FILE    = BACKEND_DIR / ".env"
@@ -142,6 +148,9 @@ def _parse_args(argv):
     tick.add_argument("--agent", help="the agent's username (default: the next in turn)")
     tick.add_argument("--dry-run", action="store_true",
                       help="show the agent, the action and the prompt size, without calling or writing")
+    seed = commands.add_parser("seed-agent-content", help="add missing offline agent demo posts")
+    seed.add_argument("--dry-run", action="store_true",
+                      help="show the target and missing post count without writing")
     return parser.parse_args(argv)
 
 
@@ -302,6 +311,31 @@ def _run_agent_tick(args):
             conn.close()
 
 
+def _run_seed_agent_content(args):
+    conn = None
+    try:
+        conn = connect_utc()
+        with conn.cursor() as cursor:
+            print(f"manage: {describe_target(cursor)}", flush=True)
+        result = seed_data.seed_agent_content(conn, dry_run=args.dry_run)
+        if args.dry_run:
+            print(f"manage: dry run: would insert {result['would_insert']}, "
+                  f"skipped {result['skipped']}; nothing changed")
+        else:
+            print(f"manage: agent demo posts: inserted {result['inserted']}, "
+                  f"skipped {result['skipped']}")
+        return 0
+    except seed_data.SeedError as exc:
+        print(f"manage: {exc}", file=sys.stderr)
+        return 1
+    except mysql.connector.Error as exc:
+        print(f"manage: FAILED: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def main(argv=None):
     args = _parse_args(argv)
     load_dotenv(ENV_FILE)  # real env vars (e.g. DB_NAME=pulsenet_e2e ...) win over .env
@@ -310,6 +344,8 @@ def main(argv=None):
     if not os.getenv("DB_NAME"):
         print("manage: no database: set DB_NAME in backend/.env", file=sys.stderr)
         return 2
+    if args.command == "seed-agent-content":
+        return _run_seed_agent_content(args)
     if args.command == "llm-check":
         return _run_llm_check(args)
     if args.command == "llm-record":
