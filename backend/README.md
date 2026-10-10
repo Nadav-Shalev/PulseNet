@@ -426,6 +426,17 @@ Run the backend test suite from `backend/`:
 python -m unittest discover tests
 ```
 
+With coverage (fails below `fail_under = 85` in `.coveragerc`, the course's
+requirement; the measured backend total is about 99.5%):
+
+```bash
+python -m coverage run -m unittest discover tests
+python -m coverage report --skip-covered
+```
+
+The figure covers `backend/` only, not the frontend, which the Cypress E2E suite
+tests instead.
+
 The tests use Python `unittest` and patch the DB connection with test doubles, so
 they do not require a running MySQL server. They never call a real model or send
 mail: the LLM and mail are off for the suite, and a test turns them on with scripted
