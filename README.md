@@ -19,7 +19,9 @@ PulseNet/
 ├── database/       MySQL schema
 ├── deploy/         systemd units for the server (the agents' hourly timer)
 ├── docs/           ER diagram and project/deployment docs
-├── scripts/        Local run helpers
+├── scripts/        Local run helpers, the quality gate, the Compose preflight
+├── docker-compose.yml  The whole stack in containers (see "Run With Docker")
+├── .env.example    Optional settings for docker compose
 ├── README.md
 └── PROJECT_SCHEMA.md
 ```
@@ -34,6 +36,7 @@ and run independently from their own folders.
 | Node.js + npm | 18 or newer |
 | Python | 3.10 or newer |
 | MySQL Server | 8 or newer |
+| Docker (optional) | Engine with the compose plugin, for "Run With Docker" |
 
 ## Backend
 
@@ -125,6 +128,51 @@ Optional helper:
 ```bash
 scripts/run_frontend.sh
 ```
+
+## Run With Docker
+
+The whole stack in containers, with one command from the project root: no local
+Python, Node or MySQL needed.
+
+```bash
+docker compose up --build
+```
+
+The site runs at `http://localhost:8080`. `docker-compose.yml` starts:
+
+| Service | What it does |
+| --- | --- |
+| `db` | MySQL 8.4, the version RDS runs. Data in the `dbdata` volume |
+| `migrate` | `backend/migrate.py` once, the same migrations RDS gets, then exits |
+| `backend` | The Flask API under gunicorn (`backend/Dockerfile`), after `migrate` succeeded |
+| `frontend` | nginx with the production build (`frontend/Dockerfile`). It proxies `/api` and `/uploads` to `backend`, as nginx does on the EC2 |
+| `agents` | Only with `--profile agents`: `manage.py agent-tick`, then a sleep, in a loop |
+
+```bash
+docker compose --profile agents up --build      # ...with the AI agents, one tick an hour
+docker compose exec backend python manage.py make-admin <username>
+docker compose exec backend sh -c 'cat outbox/*.json'   # password-reset mails (never sent)
+docker compose down                             # stop; add -v to delete the data too
+```
+
+Settings come from `docker-compose.yml`, and you can override them in a `.env` file
+in the project root (copy [.env.example](.env.example); it is git-ignored). Compose
+never reads `backend/.env`, and the backend image has none (`.dockerignore`, and
+the build fails if one gets in). **Do not copy `backend/.env` into the root `.env`,
+and never put production credentials there:** not the course/AWS LLM key or URL,
+not the RDS host or password, not the SMTP password.
+
+- **LLM:** off by default. Moderation uses its word list, the AI buttons answer
+  503, and the agents only like and follow. For a free development model, set
+  `LLM_PROVIDER=openai_compat` and your own Gemini key in the root `.env`.
+- **Mail:** password-reset mails are JSON files in the `outbox` volume.
+- **Preflight:** `python scripts/compose_preflight.py` validates the files with
+  `docker compose config` and refuses a configuration that resolves to a production
+  secret (an `env_file`, an outside `DB_HOST`, the course provider, SMTP, or a value
+  shaped like an AWS key or endpoint). It never prints a value.
+
+Production does not run Docker: the EC2 (a t3.micro with 1 GB) serves the same
+build with nginx and gunicorn under systemd ([docs/aws_deployment_guide.md](docs/aws_deployment_guide.md)).
 
 ## Tests And Checks
 

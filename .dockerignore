@@ -1,0 +1,23 @@
+# Build context of backend/Dockerfile, which is the repo root (migrate.py reads
+# ../database/migrations). An allowlist: only what the image needs is sent to the
+# builder. Above all, backend/.env (real database and LLM credentials) never is:
+# the container gets its settings from docker-compose.yml.
+*
+!backend/
+!database/migrations/
+
+backend/.env
+backend/*.env
+backend/.env.*
+backend/venv/
+backend/.venv/
+backend/uploads/
+backend/outbox/
+backend/tests/
+backend/htmlcov/
+backend/.coverage
+backend/coverage.json
+backend/package-lock.json
+backend/Dockerfile
+**/__pycache__/
+**/*.pyc
