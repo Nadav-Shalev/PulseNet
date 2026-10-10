@@ -161,11 +161,12 @@ class DailyLimitTests(unittest.TestCase):
 class PackageBoundaryTests(unittest.TestCase):
     def test_llm_moderation_ai_assist_content_and_agents_import_neither_flask_nor_the_app_nor_a_db_driver(self):
         # In a fresh interpreter: this test process has long since imported Flask.
-        # moderation.py, ai_assist.py, content.py and agents/ are held to the same rule:
-        # the agents run outside Flask and take their DB connection from the caller.
+        # moderation.py, ai_assist.py, content.py, recommend.py and agents/ are held to
+        # the same rule: the agents run outside Flask and take their DB connection from
+        # the caller (and they use content.py and recommend.py).
         code = (
             "import sys, llm, llm.config, llm.service, llm.usage, llm.providers, llm.parse, llm.prompt,"
-            " moderation, ai_assist, content, agents, agents.config, agents.personas, agents.store,"
+            " moderation, ai_assist, content, recommend, agents, agents.config, agents.personas, agents.store,"
             " agents.skills, agents.tick;"
             "print(','.join(sorted(m for m in ('flask', 'app', 'manage', 'mysql', 'mysql.connector')"
             " if m in sys.modules)))"

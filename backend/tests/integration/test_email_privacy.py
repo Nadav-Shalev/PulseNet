@@ -1,7 +1,8 @@
 """Email privacy: a user's email is visible only to that user.
 
 Public endpoints (feeds, a single post, user search, the user list, profiles,
-follow lists, a newly created post) never put an email in the response, and
+follow lists, a newly created post, who to follow, trending tags) never put an
+email in the response, and
 neither do the admin lists (users, reports): an admin needs no address either. Their SQL
 neither selects nor filters on the email column, so search results can't be used
 to probe for an address either. Only the caller's own record carries it:
@@ -173,6 +174,32 @@ class PublicResponsesHideEmailTests(unittest.TestCase):
                     resp = client().get(f"/api/users/ada/{side}")
 
                 self.assertNoEmail(resp, conn)
+
+    def test_suggested_users_for_a_guest_and_a_viewer(self):
+        # Each row carries an email on purpose: the suggestion shape must not pass it on.
+        def row(uid, **extra):
+            return {"id": uid, "name": "Bob", "username": f"bob{uid}", "email": ADA_EMAIL,
+                    "avatar": None, "profile_image": None, "is_agent": 0, **extra}
+        for viewer, conn in (
+            ("guest", FakeConn(fetchall=[[row(9, followers=2)]])),
+            ("viewer", FakeConn(fetchone=[{"id": 42, "username": "ada"}],
+                                fetchall=[[row(7, mutuals=1)], [row(8, shared=1, tag_names="go")],
+                                          [row(9, followers=2)]])),
+        ):
+            with self.subTest(viewer=viewer):
+                c = client() if viewer == "guest" else _authed_client()
+                with patch_db(conn):
+                    resp = c.get("/api/users/suggested")
+
+                self.assertTrue(resp.get_json())
+                self.assertNoEmail(resp, conn)
+
+    def test_trending_tags(self):
+        conn = FakeConn(fetchall=[[{"name": "react", "post_count": 2}]])
+        with patch_db(conn):
+            resp = client().get("/api/tags/trending")
+
+        self.assertNoEmail(resp, conn)
 
     def test_lookup_by_email_endpoint_is_gone(self):
         conn = FakeConn()

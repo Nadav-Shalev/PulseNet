@@ -262,9 +262,10 @@ class TriggerSqlTests(unittest.TestCase):
         found = SKILLS[2].find(conn.cursor(dictionary=True), AGENT, FirstChoice())
 
         self.assertEqual(found["post_id"], 9)
-        trending, _ = conn.find("from posts_tags pt")[0]
-        self.assertIn("INTERVAL 7 DAY", trending)
-        self.assertEqual(conn.params_for("from posts_tags pt"), (store.TRENDING_LIMIT,))
+        # The same trending as the home page (recommend.py), over a week.
+        self.assertTrue(conn.ran("from posts_tags pt"))
+        self.assertTrue(conn.ran("interval %s hour"))
+        self.assertEqual(conn.params_for("from posts_tags pt"), (7 * 24, store.TRENDING_LIMIT))
         sql, params = conn.find("from posts p join users u")[0]
         flat = " ".join(sql.split())
         self.assertIn("MAX(t.name IN (%s, %s, %s, %s)) AS interest_hit", flat)
