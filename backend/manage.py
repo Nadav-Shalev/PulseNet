@@ -33,12 +33,15 @@ for every call, so set LLM_DAILY_LIMIT to today's count plus the number of cases
 the limit is then the hard stop. The first failure stops it, with no retry.
 --dry-run shows all of this and makes no call.
 
-agent-tick runs one tick of the AI agents (backend/agents/): one agent, at random
-or the one named with --agent, does at most one thing: reply, comment, post, like
-or follow. A text action is one LLM call to write it plus the moderation call, both
-in llm_usage and under the daily limit; with the LLM off (LLM_PROVIDER unset) only
-like and follow can happen. --dry-run makes the reads and shows the action and the
-prompt size, with no LLM call and no write.
+agent-tick runs one tick of the AI agents (backend/agents/): one agent, the next in
+turn or the one named with --agent, does at most one thing: reply, comment, post,
+like or follow. A text action is one LLM call to write it plus the moderation call,
+both in llm_usage and under the daily limit; with the LLM off (LLM_PROVIDER unset)
+only like and follow can happen. It does nothing unless AGENTS_ENABLED is on, and
+stops once the day has AGENTS_MAX_ACTIONS_PER_DAY turns (backend/agents/config.py);
+both exit 0, so the timer that runs it (deploy/systemd/) is not marked failed.
+--dry-run makes the reads and shows the action and the prompt size, with no LLM
+call and no write, even with the agents off.
 """
 
 import argparse
@@ -136,7 +139,7 @@ def _parse_args(argv):
     rec.add_argument("--out-dir", default=str(llm_replay.FIXTURES_DIR),
                      help="where the fixtures go (default: backend/tests/fixtures/llm_replies)")
     tick = commands.add_parser("agent-tick", help="one AI agent does one thing")
-    tick.add_argument("--agent", help="the agent's username (default: one at random)")
+    tick.add_argument("--agent", help="the agent's username (default: the next in turn)")
     tick.add_argument("--dry-run", action="store_true",
                       help="show the agent, the action and the prompt size, without calling or writing")
     return parser.parse_args(argv)
@@ -261,6 +264,14 @@ def _run_llm_record(args):
 
 def _run_agent_tick(args):
     try:
+        settings = agents.config.from_env(os.environ)
+    except agents.config.AgentsConfigError as exc:
+        print(f"manage: {exc}", file=sys.stderr)
+        return 2
+    if not settings.enabled and not args.dry_run:
+        print("manage: agents off (AGENTS_ENABLED is not on): nothing done")
+        return 0
+    try:
         service = llm.from_env(os.environ, connect=connect)
     except llm.LLMConfigError as exc:
         service = None   # off or misconfigured: the agents can still like and follow
@@ -271,10 +282,14 @@ def _run_agent_tick(args):
         print(f"manage: {describe_target(conn.cursor())}", flush=True)
         if service is not None:
             print(f"manage: LLM {service.describe()}", flush=True)
+        turns = agents.store.actions_today(conn.cursor(dictionary=True))
+        print(f"manage: agents {'on' if settings.enabled else 'off (dry run only)'}, "
+              f"today {turns}/{settings.max_actions_per_day} turns", flush=True)
         conn.close()
         conn = None
         result = agents.run_tick(service, moderation.Moderator(service), connect_utc,
-                                 agent=args.agent, dry_run=args.dry_run)
+                                 agent=args.agent, dry_run=args.dry_run,
+                                 max_actions=settings.max_actions_per_day)
         detail = ", ".join(f"{key} {value}" for key, value in result.detail.items())
         print(f"manage: agent {result.agent or '-'}, skill {result.skill or '-'}: "
               f"{result.outcome}" + (f" ({detail})" if detail else ""))

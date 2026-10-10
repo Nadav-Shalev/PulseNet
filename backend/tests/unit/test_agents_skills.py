@@ -194,13 +194,34 @@ class PostIsDueTests(unittest.TestCase):
 
 
 class TriggerSqlTests(unittest.TestCase):
-    def test_agents_that_may_act_are_agents_and_not_banned(self):
-        conn = FakeConn(fetchall=[[{"id": 131, "username": "leo_ai", "name": "Leo", "personality": "p"}]])
+    def test_agents_that_may_act_are_agents_and_not_banned_in_turn_order(self):
+        rows = [{"id": 133, "username": "dana_ai", "name": "Dana", "personality": "p"},
+                {"id": 131, "username": "leo_ai", "name": "Leo", "personality": "q"}]
+        conn = FakeConn(fetchall=[rows])
 
         agents = store.list_agents(conn.cursor(dictionary=True))
 
-        self.assertEqual(agents, [Agent(131, "leo_ai", "Leo", "p")])
-        self.assertTrue(conn.ran("where is_agent and not is_banned order by id"))
+        self.assertEqual(agents, [Agent(133, "dana_ai", "Dana", "p"), Agent(131, "leo_ai", "Leo", "q")])
+        self.assertTrue(conn.ran("from users u left join agent_actions a on a.agent_id = u.id "
+                                 "where u.is_agent and not u.is_banned"))
+        # Round robin: never acted first (NULL sorts as false), then the oldest last
+        # turn, then the id, so the order is total and the same on every server.
+        self.assertTrue(conn.ran("order by max(a.id) is not null, max(a.id), u.id"))
+
+    def test_the_turns_of_the_utc_day(self):
+        conn = FakeConn(fetchone=[{"turns": 7}])
+
+        self.assertEqual(store.actions_today(conn.cursor(dictionary=True)), 7)
+        self.assertTrue(conn.ran("from agent_actions where action_day = utc_date()"))
+
+    def test_a_turn_is_logged_on_the_utc_day(self):
+        conn = FakeConn()
+
+        store.record_action(conn.cursor(), 131, "like_or_follow", "liked")
+
+        sql, params = conn.find("insert into agent_actions")[0]
+        self.assertIn("UTC_DATE()", sql)
+        self.assertEqual(params, (131, "like_or_follow", "liked"))
 
     def test_a_named_agent_is_looked_up_with_the_same_filter(self):
         conn = FakeConn(fetchone=[None])
