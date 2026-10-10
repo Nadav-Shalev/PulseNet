@@ -161,17 +161,17 @@ class SearchUsersTests(unittest.TestCase):
 
     def test_db_down_searches_mock_users(self):
         with db_down():
-            resp = client().get("/api/users/search?q=BOB")
+            resp = client().get("/api/users/search?q=LEO")
 
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual([u["username"] for u in resp.get_json()], ["bobcoder"])
+        self.assertEqual([u["username"] for u in resp.get_json()], ["leo_ai"])
 
     def test_db_down_mock_search_is_paged(self):
-        # "c" is in every mock username (alicedev, bobcoder, carolscript).
+        # Every mock agent username includes "_ai".
         with db_down():
-            resp = client().get("/api/users/search?q=c&limit=1&offset=1")
+            resp = client().get("/api/users/search?q=_ai&limit=1&offset=1")
 
-        self.assertEqual([u["username"] for u in resp.get_json()], ["bobcoder"])
+        self.assertEqual([u["username"] for u in resp.get_json()], ["leo_ai"])
 
 
 class ListUsersTests(unittest.TestCase):

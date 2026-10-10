@@ -151,22 +151,22 @@ class ArticleListFallbackTests(unittest.TestCase):
             resp = client().get("/api/articles")
 
         self.assertEqual(resp.status_code, 200)
-        # mock_data has 4 posts, newest first.
-        self.assertEqual([p["id"] for p in resp.get_json()], [4, 3, 2, 1])
+        # The first page contains each agent's most recent demo post.
+        self.assertEqual([p["id"] for p in resp.get_json()], list(range(1, 31, 3)))
 
     def test_db_down_still_filters_by_username(self):
         with db_down():
-            resp = client().get("/api/articles?username=alicedev")
+            resp = client().get("/api/articles?username=priya_ai")
 
         posts = resp.get_json()
-        self.assertEqual(sorted(p["id"] for p in posts), [1, 4])
-        self.assertTrue(all(p["user"]["username"] == "alicedev" for p in posts))
+        self.assertEqual(sorted(p["id"] for p in posts), [1, 2, 3])
+        self.assertTrue(all(p["user"]["username"] == "priya_ai" for p in posts))
 
     def test_db_down_paginates_mock_articles(self):
         with db_down():
             resp = client().get("/api/articles?page=2&per_page=3")
 
-        self.assertEqual([p["id"] for p in resp.get_json()], [1])
+        self.assertEqual([p["id"] for p in resp.get_json()], [10, 13, 16])
 
 
 class ArticleDetailTests(unittest.TestCase):
@@ -266,8 +266,8 @@ class ArticleDetailFallbackTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 200)
         post = resp.get_json()
-        self.assertEqual(post["title"], "Getting Started with React Hooks")
-        self.assertTrue(post["body_html"].startswith("<p>React Hooks"))
+        self.assertEqual(post["title"], "A regression test before the two-line fix")
+        self.assertTrue(post["body_html"].startswith("<p>A parser"))
 
     def test_db_down_unknown_id_returns_404(self):
         with db_down():

@@ -236,9 +236,9 @@ class SearchDoesNotMatchEmailTests(unittest.TestCase):
         )
 
     def test_mock_search_ignores_email(self):
-        # Every mock user's address ends in "@dev.to"; no name or username has it.
+        # Agent email domains must not match public name/username searches.
         with db_down():
-            resp = client().get("/api/users/search?q=@dev.to")
+            resp = client().get("/api/users/search?q=@agents.pulsenet.invalid")
 
         self.assertEqual(resp.get_json(), [])
 

@@ -1,221 +1,255 @@
-"""seed_data.py tests: DEV.to import script, with HTTP and the DB both faked.
-
-``requests.get`` is mocked so no network is touched, ``time.sleep`` is mocked so the
-polite pause between pages costs nothing, and the DB is a ``FakeConn``. The helpers
-are checked one by one, then ``seed()`` end to end: dedup of users and posts,
-skipping of authorless articles and empty tags, and surviving a failed page.
-"""
-
+"""Offline, additive seeding against a stateful SQL store and the real CLI."""
 import io
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-import requests
+import mysql.connector
 
-HERE = Path(__file__).resolve().parent
-TESTS_DIR = HERE.parent
-BACKEND_DIR = TESTS_DIR.parent
-for _p in (BACKEND_DIR, TESTS_DIR, HERE):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+for directory in (BACKEND_DIR, BACKEND_DIR / "tests"):
+    sys.path.insert(0, str(directory))
 
-import seed_data  # noqa: E402
-from support import FakeConn  # noqa: E402
+import demo_content
+import manage
+import seed_data
+from seed_support import SeedDatabase
+from support import FakeConn
 
-
-def _article(**over):
-    """One item of DEV.to's GET /api/articles list."""
-    item = {
-        "id": 1001, "title": "Hello DEV", "description": "short",
-        "cover_image": "https://img/c.png", "url": "https://dev.to/ada/hello",
-        "readable_publish_date": "Oct 7", "tag_list": ["react"],
-        "user": {"username": "ada", "name": "Ada", "profile_image": "https://img/ada.png"},
-    }
-    item.update(over)
-    return item
+NOW = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
 
 
-def _devto_reply(articles):
-    reply = Mock()
-    reply.json.return_value = articles
-    return reply
+class OfflineTests(unittest.TestCase):
+    def setUp(self):
+        self.db = SeedDatabase()
+        self.addCleanup(self.db.raw.close)
+        fixed_clock = patch.object(demo_content, "datetime")
+        fixed_clock.start().now.return_value = NOW
+        self.addCleanup(fixed_clock.stop)
+        # Fail before anything can reach an HTTP transport or model, even if .env
+        # enables real providers. Every test in this module inherits these guards.
+        for target in (
+            "requests.sessions.Session.request",
+            "socket.create_connection",
+            "llm.LLMService.complete",
+            "llm.from_env",
+        ):
+            guard = patch(target, side_effect=AssertionError("external call forbidden"))
+            guard.start()
+            self.addCleanup(guard.stop)
+
+    def seed(self, **kwargs):
+        kwargs.setdefault("now", NOW)
+        return seed_data.seed_agent_content(self.db, **kwargs)
 
 
-class FetchArticlesPageTests(unittest.TestCase):
-    def test_requests_one_page_and_returns_its_json(self):
-        with patch.object(seed_data.requests, "get", return_value=_devto_reply([_article()])) as get:
-            articles = seed_data.fetch_articles_page(3)
+class SeedTests(OfflineTests):
+    def test_inserts_30_posts_for_database_ids_with_tags_and_no_devto_fields(self):
+        result = self.seed()
+        self.assertEqual(result, {"inserted": 30, "skipped": 0, "would_insert": 0})
+        rows = self.db.raw.execute(
+            "SELECT u.username, COUNT(*) FROM posts p JOIN users u ON u.id=p.author_id GROUP BY u.username"
+        ).fetchall()
+        self.assertEqual(dict(rows), {p["username"]: 3 for p in demo_content.AGENT_PROFILES})
+        self.assertEqual(self.db.raw.execute(
+            "SELECT COUNT(*) FROM posts WHERE devto_id IS NOT NULL OR devto_url IS NOT NULL"
+        ).fetchone()[0], 0)
+        for post in demo_content.build_posts(NOW):
+            saved = self.db.raw.execute(
+                "SELECT p.id, p.body, p.body_html, p.description, p.created_at FROM posts p "
+                "JOIN users u ON u.id=p.author_id WHERE u.username=? AND p.title=?",
+                (post["username"], post["title"]),
+            ).fetchone()
+            self.assertEqual(saved[1:4], (post["body"], post["body_html"], post["description"]))
+            self.assertEqual(datetime.fromisoformat(saved[4]), post["created_at"].replace(tzinfo=None))
+            tags = self.db.raw.execute(
+                "SELECT t.name FROM posts_tags pt JOIN tags t ON t.id=pt.tag_id WHERE pt.post_id=?", (saved[0],)
+            ).fetchall()
+            self.assertEqual({t[0] for t in tags}, set(post["tags"]))
+        self.assertEqual(self.db.commits, 1)
+        self.assertEqual(self.db.cursors_closed, 1)
 
-        self.assertEqual(articles, [_article()])
-        get.assert_called_once_with(
-            f"{seed_data.DEVTO_BASE}/articles",
-            params={"page": 3, "per_page": seed_data.PER_PAGE},
-            timeout=15,
+    def test_second_run_with_new_clock_is_a_noop_including_tags_and_timestamps(self):
+        self.seed()
+        snapshot = self.db.snapshot()
+        result = self.seed(now=NOW + timedelta(days=7))
+        self.assertEqual(result, {"inserted": 0, "skipped": 30, "would_insert": 0})
+        self.assertEqual(self.db.snapshot(), snapshot)
+
+    def test_partial_dataset_and_existing_edited_content_are_preserved(self):
+        fixture = demo_content.POSTS[0]
+        author = self.db.raw.execute("SELECT id FROM users WHERE username=?", (fixture.username,)).fetchone()[0]
+        self.db.raw.execute(
+            "INSERT INTO posts (id,author_id,title,body,body_html,created_at) VALUES (900,?,?,?,?,?)",
+            (author, fixture.title, "Edited existing content", "<p>Edited</p>", "2024-01-01 00:00:00"),
         )
-        get.return_value.raise_for_status.assert_called_once_with()
-
-    def test_http_error_propagates(self):
-        reply = _devto_reply([])
-        reply.raise_for_status.side_effect = requests.HTTPError("503")
-        with patch.object(seed_data.requests, "get", return_value=reply):
-            with self.assertRaises(requests.HTTPError):
-                seed_data.fetch_articles_page(1)
-
-
-class EnsureUserTests(unittest.TestCase):
-    def test_existing_username_returns_its_id_without_insert(self):
-        conn = FakeConn(fetchone=[(5,)])
-
-        user_id = seed_data.ensure_user(conn.cursor(), {"username": "ada"})
-
-        self.assertEqual(user_id, 5)
-        self.assertFalse(conn.ran("insert into users"))
-
-    def test_new_user_is_inserted_with_devto_fields(self):
-        conn = FakeConn(lastrowid=9)
-
-        user_id = seed_data.ensure_user(conn.cursor(), {
-            "username": "ada", "name": "Ada", "profile_image": "https://img/ada.png",
-        })
-
-        self.assertEqual(user_id, 9)
-        self.assertEqual(
-            conn.params_for("insert into users"),
-            ("Ada", "ada", "ada@dev.to", "", "https://img/ada.png", "https://img/ada.png"),
+        self.db.raw.execute(
+            "INSERT INTO posts (id,author_id,title,body,devto_id,devto_url) VALUES (901,?,?,?,?,?)",
+            (author, "Existing legacy article", "Keep me", 12345, "https://dev.to/legacy"),
         )
+        self.db.raw.execute("INSERT INTO tags (id,name) VALUES (900,'React')")
+        self.db.raw.execute("INSERT INTO posts_tags VALUES (900,900)")
+        self.db.raw.commit()
+        before = self.db.snapshot()
+        result = self.seed()
+        self.assertEqual(result["inserted"], 29)
+        self.assertEqual(result["skipped"], 1)
+        after = self.db.snapshot()
+        for table, rows in before.items():
+            for row in rows:
+                self.assertIn(row, after[table], table)
+        self.assertEqual(self.db.raw.execute("SELECT COUNT(*) FROM posts_tags WHERE post_id=900").fetchone()[0], 1)
+        self.assertEqual(self.seed(now=NOW + timedelta(days=1))["inserted"], 0)
 
-    def test_missing_name_and_image_fall_back(self):
-        conn = FakeConn()
+    def test_dry_run_is_read_only_on_empty_and_partially_seeded_databases(self):
+        before = self.db.snapshot()
+        result = self.seed(dry_run=True)
+        self.assertEqual(result, {"inserted": 0, "skipped": 0, "would_insert": 30})
+        self.assertEqual(before, self.db.snapshot())
+        self.assertEqual(self.db.commits, 0)
+        self.assertTrue(all(sql.startswith("SELECT ") and "FOR UPDATE" not in sql
+                            for sql, _ in self.db.executed))
+        self.seed()
+        self.db.raw.execute("DELETE FROM posts_tags WHERE post_id=1")
+        self.db.raw.execute("DELETE FROM posts WHERE id=1")
+        self.db.raw.commit()
+        self.assertEqual(self.seed(dry_run=True), {"inserted": 0, "skipped": 29, "would_insert": 1})
 
-        seed_data.ensure_user(conn.cursor(), {"username": "ghost", "name": None})
+    def test_missing_or_non_agent_account_aborts_before_any_write(self):
+        for invalid in ("missing", "not_agent"):
+            with self.subTest(invalid=invalid):
+                if invalid == "missing":
+                    self.db.raw.execute("DELETE FROM users WHERE username='viktor_ai'")
+                else:
+                    self.db.raw.execute("INSERT INTO users VALUES (999,'viktor_ai',0,0)")
+                self.db.raw.commit()
+                before = self.db.snapshot()
+                with self.assertRaisesRegex(seed_data.SeedError, "viktor_ai"):
+                    self.seed()
+                self.assertEqual(before, self.db.snapshot())
+        self.assertFalse(any(sql.startswith("INSERT") for sql, _ in self.db.executed))
+        self.assertEqual(self.db.rollbacks, 2)
 
-        name, _, email, _, avatar, image = conn.params_for("insert into users")
-        self.assertEqual(name, "ghost")
-        self.assertEqual(email, "ghost@dev.to")
-        self.assertEqual(avatar, f"{seed_data.DICEBEAR_URL}?seed=ghost")
-        self.assertEqual(image, avatar)
+    def test_banned_agents_are_seeded_without_changing_account_flags(self):
+        self.db.raw.execute("UPDATE users SET is_banned=1 WHERE username='priya_ai'")
+        self.db.raw.commit()
+        before = self.db.snapshot()["users"]
+        self.assertEqual(self.seed()["inserted"], 30)
+        self.assertEqual(before, self.db.snapshot()["users"])
+
+    def test_tag_link_failure_rolls_back_the_entire_batch(self):
+        before = self.db.snapshot()
+        self.db.raise_on["insert into posts_tags"] = mysql.connector.Error("link failure")
+        with self.assertRaisesRegex(mysql.connector.Error, "link failure"):
+            self.seed()
+        self.assertEqual(before, self.db.snapshot())
+        self.assertEqual(self.db.commits, 0)
+        self.assertEqual(self.db.rollbacks, 1)
+        self.assertEqual(self.db.cursors_closed, 1)
+        self.db.raise_on.clear()
+        self.assertEqual(self.seed()["inserted"], 30)
+
+    def test_non_duplicate_integrity_error_and_commit_failure_roll_back(self):
+        before = self.db.snapshot()
+        self.db.raise_on["insert into tags"] = mysql.connector.IntegrityError("bad tag", errno=1452)
+        with self.assertRaises(mysql.connector.IntegrityError):
+            self.seed()
+        self.assertEqual(before, self.db.snapshot())
+        self.db.raise_on.clear()
+        with patch.object(self.db, "commit", side_effect=mysql.connector.Error("commit failed")):
+            with self.assertRaisesRegex(mysql.connector.Error, "commit failed"):
+                self.seed()
+        self.assertEqual(before, self.db.snapshot())
+
+    def test_user_locks_precede_writes_and_duplicate_reads_see_current_data(self):
+        self.seed()
+        queries = self.db.executed
+        users = [(sql, params) for sql, params in queries if "FROM users" in sql]
+        self.assertEqual([p[0] for _, p in users], sorted(p["username"] for p in demo_content.AGENT_PROFILES))
+        self.assertTrue(all(sql.endswith("FOR UPDATE") for sql, _ in users))
+        first_write = next(i for i, (sql, _) in enumerate(queries) if sql.startswith("INSERT"))
+        self.assertGreaterEqual(first_write, 10)
+        self.assertTrue(all(sql.endswith("FOR UPDATE") for sql, _ in queries if "FROM posts WHERE" in sql))
+        self.assertFalse(any(sql.startswith(("UPDATE", "DELETE", "REPLACE", "TRUNCATE")) for sql, _ in queries))
+
+    def test_existing_exact_case_tags_are_reused_and_other_case_is_preserved(self):
+        self.db.raw.executemany("INSERT INTO tags (name) VALUES (?)", [("python",), ("Python",)])
+        self.db.raw.commit()
+        self.seed()
+        self.assertEqual(self.db.raw.execute(
+            "SELECT name FROM tags WHERE lower(name)='python' ORDER BY name").fetchall(), [("Python",), ("python",)])
 
 
-class EnsureTagTests(unittest.TestCase):
-    def test_inserts_if_missing_then_returns_id_keeping_case(self):
-        conn = FakeConn(fetchone=[(11,)])
+class SeedCliTests(OfflineTests):
+    def run_cli(self, args, entry=manage.main, db=None, env=None):
+        out, err = io.StringIO(), io.StringIO()
+        settings = {"DB_HOST": "seed-db", "DB_NAME": "seed_test",
+                    "DB_USER": "secret-user", "DB_PASSWORD": "secret-password"}
+        with patch.object(manage, "connect", return_value=self.db if db is None else db) as connect, \
+             patch.object(manage, "load_dotenv"), \
+             patch.dict(manage.os.environ, settings if env is None else env, clear=True), \
+             redirect_stdout(out), redirect_stderr(err):
+            result = entry(args)
+        self.connect = connect
+        return result, out.getvalue(), err.getvalue()
 
-        tag_id = seed_data.ensure_tag(conn.cursor(), "  React ")
+    def test_command_prints_target_and_summary_and_uses_utc(self):
+        code, out, err = self.run_cli(["seed-agent-content"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[0], "manage: MySQL test-store at seed-db, database seed_test")
+        self.assertIn("inserted 30, skipped 0", out)
+        self.assertNotIn("secret-user", out + err)
+        self.assertNotIn("secret-password", out + err)
+        self.connect.assert_called_once_with(time_zone="+00:00")
+        self.assertTrue(self.db.closed)
+        self.assertEqual(self.db.cursors_closed, 2)
 
-        self.assertEqual(tag_id, 11)
-        # Trimmed but not lowercased: tags.name is case-sensitive (utf8mb4_bin).
-        self.assertEqual(conn.params_for("insert ignore into tags"), ("React",))
-        self.assertEqual(conn.params_for("select id from tags"), ("React",))
+    def test_dry_run_and_repeat_cli_summaries(self):
+        code, out, _ = self.run_cli(["seed-agent-content", "--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("would insert 30, skipped 0; nothing changed", out)
+        self.assertEqual(len(self.db.snapshot()["posts"]), 0)
+        self.run_cli(["seed-agent-content"])
+        code, out, _ = self.run_cli(["seed-agent-content"])
+        self.assertEqual(code, 0)
+        self.assertIn("inserted 0, skipped 30", out)
 
+    def test_seed_script_delegates_arguments_including_sys_argv(self):
+        code, out, _ = self.run_cli(["--dry-run"], entry=seed_data.main)
+        self.assertEqual(code, 0)
+        self.assertIn("would insert 30", out)
+        with patch.object(sys, "argv", ["seed_data.py", "--dry-run"]):
+            code, out, _ = self.run_cli(None, entry=seed_data.main)
+        self.assertEqual(code, 0)
+        self.assertIn("would insert 30", out)
 
-class InsertPostTests(unittest.TestCase):
-    def test_duplicate_devto_id_is_skipped(self):
-        conn = FakeConn(fetchone=[(77,)])
+    def test_missing_database_configuration_returns_usage_error(self):
+        code, _, err = self.run_cli(["seed-agent-content"], env={})
+        self.assertEqual(code, 2)
+        self.assertIn("DB_NAME", err)
+        self.connect.assert_not_called()
 
-        post_id = seed_data.insert_post(conn.cursor(), _article(), author_id=5)
-
-        self.assertIsNone(post_id)
-        self.assertEqual(conn.params_for("select id from posts where devto_id"), (1001,))
-        self.assertFalse(conn.ran("insert into posts"))
-
-    def test_new_post_is_inserted(self):
-        conn = FakeConn(lastrowid=31)
-
-        post_id = seed_data.insert_post(conn.cursor(), _article(), author_id=5)
-
-        self.assertEqual(post_id, 31)
-        self.assertEqual(
-            conn.params_for("insert into posts"),
-            (5, "Hello DEV", "short", "short", "https://img/c.png",
-             1001, "https://dev.to/ada/hello", "Oct 7"),
-        )
-
-    def test_long_title_is_truncated_and_blank_fields_become_null(self):
-        conn = FakeConn()
-
-        seed_data.insert_post(conn.cursor(), _article(
-            title="t" * 200, description=None, cover_image="", url=None,
-            readable_publish_date="",
-        ), author_id=5)
-
-        params = conn.params_for("insert into posts")
-        self.assertEqual(len(params[1]), 150)            # posts.title is VARCHAR(150)
-        self.assertEqual(params[2:5], ("", "", None))     # body, description, cover_image
-        self.assertEqual(params[6:], (None, None))        # devto_url, readable_publish_date
-
-
-class SeedTests(unittest.TestCase):
-    def _seed(self, conn, pages, pages_to_fetch=None):
-        """Run seed() against ``conn`` with DEV.to serving ``pages`` (lists or exceptions)."""
-        replies = [p if isinstance(p, Exception) else _devto_reply(p) for p in pages]
-        out = io.StringIO()
-        with patch.object(seed_data, "get_db_connection", return_value=conn), \
-             patch.object(seed_data, "PAGES_TO_FETCH", pages_to_fetch or len(pages)), \
-             patch.object(seed_data.requests, "get", side_effect=replies), \
-             patch.object(seed_data.time, "sleep") as sleep, \
-             redirect_stdout(out):
-            seed_data.seed()
-        return out.getvalue(), sleep
-
-    def test_new_author_post_and_tags_are_inserted(self):
-        conn = FakeConn(
-            # user_existed check, ensure_user lookup, duplicate-post check, tag ids
-            fetchone=[None, None, None, (11,), (12,)],
-            lastrowid=31,
-        )
-
-        out, sleep = self._seed(conn, [[_article(tag_list=["react", "", "flask"])]])
-
-        self.assertTrue(conn.ran("insert into users"))
-        self.assertTrue(conn.ran("insert into posts"))
-        links = [params for _, params in conn.find("insert ignore into posts_tags")]
-        self.assertEqual(links, [(31, 11), (31, 12)])     # the empty tag is skipped
-        self.assertEqual(conn.commits, 1)                 # one commit per page
+    def test_invalid_agent_and_sql_failure_report_errors_and_close(self):
+        self.db.raw.execute("UPDATE users SET is_agent=0 WHERE username='rex_ai'")
+        self.db.raw.commit()
+        code, _, err = self.run_cli(["seed-agent-content"])
+        self.assertEqual(code, 1)
+        self.assertIn("rex_ai", err)
+        self.assertTrue(self.db.closed)
+        conn = FakeConn(raise_on={"select version()": mysql.connector.Error("unavailable")})
+        code, _, err = self.run_cli(["seed-agent-content"], db=conn)
+        self.assertEqual(code, 1)
+        self.assertIn("FAILED: unavailable", err)
         self.assertTrue(conn.closed)
-        sleep.assert_called_once()
-        self.assertIn("Users inserted : 1", out)
-        self.assertIn("Posts inserted : 1", out)
-        self.assertIn("Tag links added: 2", out)
 
-    def test_existing_author_is_reused(self):
-        conn = FakeConn(fetchone=[(5,), (5,), None, (11,)], lastrowid=31)
-
-        out, _ = self._seed(conn, [[_article()]])
-
-        self.assertFalse(conn.ran("insert into users"))
-        self.assertEqual(conn.params_for("insert into posts")[0], 5)    # author_id
-        self.assertIn("Users inserted : 0", out)
-
-    def test_already_imported_post_adds_no_tags(self):
-        conn = FakeConn(fetchone=[(5,), (5,), (77,)])
-
-        out, _ = self._seed(conn, [[_article()]])
-
-        self.assertFalse(conn.ran("insert into posts"))
-        self.assertFalse(conn.ran("into tags"))
-        self.assertIn("Posts inserted : 0", out)
-
-    def test_articles_without_author_username_are_skipped(self):
-        conn = FakeConn()
-
-        out, _ = self._seed(conn, [[_article(user=None), _article(user={"name": "anon"})]])
-
-        self.assertEqual(conn.executed, [])
-        self.assertEqual(conn.commits, 1)
-        self.assertIn("done (2 articles)", out)
-
-    def test_failed_page_is_reported_and_the_next_page_still_runs(self):
-        conn = FakeConn(fetchone=[None, None, None, (11,)])
-
-        out, sleep = self._seed(conn, [requests.ConnectionError("offline"), [_article()]])
-
-        self.assertIn("FAILED (offline)", out)
-        self.assertIn("Posts inserted : 1", out)
-        self.assertEqual(conn.commits, 1)                 # only the page that loaded
-        sleep.assert_called_once()
+    def test_connection_failure_reports_without_cleanup_error(self):
+        with patch.object(manage, "connect_utc", side_effect=mysql.connector.Error("refused")):
+            code, _, err = self.run_cli(["seed-agent-content"])
+        self.assertEqual(code, 1)
+        self.assertIn("refused", err)
 
 
 if __name__ == "__main__":
