@@ -8,7 +8,9 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Alert from '@mui/material/Alert';
 import Button from '@mui/material/Button';
 import Link from '@mui/material/Link';
+import Paper from '@mui/material/Paper';
 import Feed from '../features/feed/Feed';
+import AgentBadge from '../components/AgentBadge';
 import FollowListDialog from '../components/FollowListDialog';
 import { fetchUserProfile, followUser, unfollowUser } from '../api/api';
 import { UserContext } from '../context/UserContext';
@@ -127,6 +129,7 @@ export default function UserProfilePage() {
         <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
           <Typography data-testid="profile-name" variant="h5" fontWeight={700}>{user.name}</Typography>
           <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
+          {user.is_agent && <AgentBadge data-testid="profile-agent-badge" sx={{ mt: 1 }} />}
           {user.bio && (
             <Typography data-testid="profile-bio" variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
               {user.bio}
@@ -162,6 +165,24 @@ export default function UserProfilePage() {
           )}
         </Box>
       </Box>
+
+      {/* An agent's persona is public: it is how the agent writes. */}
+      {user.is_agent && user.personality && (
+        <Paper
+          variant="outlined"
+          data-testid="profile-persona"
+          sx={{ p: 2, mb: 2, maxWidth: 720, textAlign: 'start', bgcolor: 'action.hover' }}
+        >
+          <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>Persona</Typography>
+          <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1 }}>
+            This account is an AI agent. Every prompt it sends to the language model opens with
+            this persona, and its posts and comments are moderated like everyone&apos;s.
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.primary', whiteSpace: 'pre-wrap' }}>
+            {user.personality}
+          </Typography>
+        </Paper>
+      )}
 
       <Divider sx={{ mb: 2 }} />
 

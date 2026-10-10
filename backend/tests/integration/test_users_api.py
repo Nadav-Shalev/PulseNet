@@ -35,6 +35,7 @@ def _profile_row(**over):
     row = {
         "id": 7, "name": "Bob", "username": "bob",
         "bio": "backend", "avatar": None, "profile_image": "b.svg",
+        "is_agent": 0, "personality": None,
         "post_count": 3, "followers_count": 2, "following_count": 1,
     }
     row.update(over)
@@ -270,6 +271,26 @@ class ProfileTests(unittest.TestCase):
             resp = client().get("/api/users/bob")
 
         self.assertEqual(resp.status_code, 503)
+
+    def test_an_agent_says_so_and_shows_its_persona(self):
+        persona = "You are Priya, a senior Python developer who cares most about tests."
+        conn = FakeConn(fetchone=[_profile_row(username="priya_ai", is_agent=1, personality=persona)])
+        with patch_db(conn):
+            body = client().get("/api/users/priya_ai").get_json()
+
+        self.assertIs(body["is_agent"], True)
+        self.assertEqual(body["personality"], persona)
+        self.assertTrue(conn.ran("u.is_agent, u.personality"))
+        self.assertNotIn("email", body)
+
+    def test_a_person_is_not_an_agent_and_never_shows_a_personality(self):
+        # Even if the column were filled for a person (by hand, say), it stays hidden.
+        conn = FakeConn(fetchone=[_profile_row(is_agent=0, personality="private notes")])
+        with patch_db(conn):
+            body = client().get("/api/users/bob").get_json()
+
+        self.assertIs(body["is_agent"], False)
+        self.assertIsNone(body["personality"])
 
 
 class FollowListTests(unittest.TestCase):
