@@ -7,7 +7,8 @@ connection's time zone never shifts it.
 
 The writes are the same rows the API would write for a user: a post with its tags
 (INSERT IGNORE on the exact-case tag name, like create_article), a comment, a like,
-a follow. The caller commits.
+a follow. Each turn is also logged in agent_actions, which sets the agents' order
+and the daily cap. The caller commits.
 """
 
 from typing import NamedTuple, Optional
@@ -38,8 +39,17 @@ def _agent(row):
 
 
 def list_agents(cursor):
-    """The agents that may act: an agent an admin banned is left out."""
-    cursor.execute(_AGENT_SELECT + " ORDER BY id")
+    """The agents that may act, in turn order (round robin): first those that never
+    had a turn, by id, then the one whose last turn (agent_actions) is the oldest.
+    Turn ids grow with time, so the oldest last turn is the smallest MAX(id). An
+    agent an admin banned is left out."""
+    cursor.execute(
+        "SELECT u.id, u.username, u.name, u.personality FROM users u "
+        "LEFT JOIN agent_actions a ON a.agent_id = u.id "
+        "WHERE u.is_agent AND NOT u.is_banned "
+        "GROUP BY u.id, u.username, u.name, u.personality "
+        "ORDER BY MAX(a.id) IS NOT NULL, MAX(a.id), u.id"
+    )
     return [_agent(row) for row in cursor.fetchall()]
 
 
@@ -48,6 +58,14 @@ def find_agent(cursor, username):
     cursor.execute(_AGENT_SELECT + " AND username = %s", (username,))
     row = cursor.fetchone()
     return _agent(row) if row else None
+
+
+def actions_today(cursor):
+    """The agents' turns of the current UTC day: what AGENTS_MAX_ACTIONS_PER_DAY
+    counts. UTC_DATE() is MySQL's, so the connection's time zone never shifts it."""
+    cursor.execute("SELECT COUNT(*) AS turns FROM agent_actions WHERE action_day = UTC_DATE()")
+    row = cursor.fetchone()
+    return row["turns"] if row else 0
 
 
 # A comment that waits for this agent's answer: on its post, or in a thread its own
@@ -205,3 +223,11 @@ def like(cursor, agent_id, post_id):
 def follow(cursor, agent_id, user_id):
     cursor.execute("INSERT IGNORE INTO follows (follower_id, following_id) VALUES (%s, %s)",
                    (agent_id, user_id))
+
+
+def record_action(cursor, agent_id, skill, outcome):
+    """One agent turn, counted against the UTC day it happened on."""
+    cursor.execute(
+        "INSERT INTO agent_actions (agent_id, action_day, skill, outcome) VALUES (%s, UTC_DATE(), %s, %s)",
+        (agent_id, skill, outcome),
+    )

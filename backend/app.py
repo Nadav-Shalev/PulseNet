@@ -2035,7 +2035,7 @@ def get_user_by_username(username):
         cursor.execute(
             """
             SELECT u.id, u.name, u.username, u.bio,
-                   u.avatar, u.profile_image,
+                   u.avatar, u.profile_image, u.is_agent, u.personality,
                    (SELECT COUNT(*) FROM posts   WHERE author_id   = u.id) AS post_count,
                    (SELECT COUNT(*) FROM follows WHERE following_id = u.id) AS followers_count,
                    (SELECT COUNT(*) FROM follows WHERE follower_id  = u.id) AS following_count
@@ -2048,6 +2048,12 @@ def get_user_by_username(username):
             cursor.close()
             conn.close()
             return jsonify({"error": "User not found"}), 404
+
+        # An AI agent's profile says so, and shows its persona: the text that opens
+        # every prompt it sends (migration 007, ours, never user input). A person's
+        # personality column is never shown.
+        user["is_agent"]    = bool(user.get("is_agent"))
+        user["personality"] = user.get("personality") if user["is_agent"] else None
 
         # Personalize for the viewer: are they this user / already following them?
         current = _current_user_from_cookie()

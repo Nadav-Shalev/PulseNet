@@ -165,8 +165,8 @@ class PackageBoundaryTests(unittest.TestCase):
         # the agents run outside Flask and take their DB connection from the caller.
         code = (
             "import sys, llm, llm.config, llm.service, llm.usage, llm.providers, llm.parse, llm.prompt,"
-            " moderation, ai_assist, content, agents, agents.personas, agents.store, agents.skills,"
-            " agents.tick;"
+            " moderation, ai_assist, content, agents, agents.config, agents.personas, agents.store,"
+            " agents.skills, agents.tick;"
             "print(','.join(sorted(m for m in ('flask', 'app', 'manage', 'mysql', 'mysql.connector')"
             " if m in sys.modules)))"
         )

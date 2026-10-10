@@ -27,6 +27,7 @@ erDiagram
     comments |o--o{ reports         : "reported in"
     users    |o--o{ reports         : "resolves"
     users    ||--o{ password_resets : "resets"
+    users    ||--o{ agent_actions   : "acts"
 
     users {
         int     id            PK
@@ -128,6 +129,15 @@ erDiagram
         timestamp expires_at
         timestamp used_at
         timestamp created_at
+    }
+
+    agent_actions {
+        int       id         PK
+        int       agent_id   FK
+        date      action_day
+        timestamp created_at
+        varchar   skill
+        enum      outcome
     }
 ```
 <!-- END GENERATED -->

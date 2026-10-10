@@ -421,12 +421,15 @@ class LlmRecordTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("FAILED", err.getvalue())
 
+
 AGENT_ROW = {"id": 131, "username": "leo_ai", "name": "Leo Marchetti", "personality": "You are Leo."}
+ON = {**ENV, "AGENTS_ENABLED": "1"}
 
 
 class AgentTickTests(unittest.TestCase):
     """agent-tick: every connection is the same FakeConn, seeded with the server
-    version, then the agent list and what the triggers read."""
+    version, the day's turns (read by manage.py for its status line, then by the
+    tick for the cap), then the agent list and what the triggers read."""
 
     def run_main(self, argv, conn, env):
         out, err = io.StringIO(), io.StringIO()
@@ -438,10 +441,11 @@ class AgentTickTests(unittest.TestCase):
         self.connect = connect
         return code, out.getvalue(), err.getvalue()
 
-    def likeable(self):
-        # The version; the agent; no trending tags, nobody to follow, post 12 to like.
+    def likeable(self, turns=4):
+        # The version; the turns, twice; the agent; nobody to follow, post 12 to like.
         # (The LLM is off, so no trigger of an LLM skill reads anything.)
-        return FakeConn(fetchone=[("9.7.0",)], fetchall=[[AGENT_ROW], [], [{"id": 12}]])
+        return FakeConn(fetchone=[("9.7.0",), {"turns": turns}, {"turns": turns}],
+                        fetchall=[[AGENT_ROW], [], [{"id": 12}]])
 
     def test_dry_run_with_the_llm_off_shows_the_action_and_writes_nothing(self):
         conn = self.likeable()
@@ -452,39 +456,75 @@ class AgentTickTests(unittest.TestCase):
         lines = out.splitlines()
         self.assertRegex(lines[0], r"^manage: LLM off \(LLM_PROVIDER is not set.*\): only like and follow$")
         self.assertEqual(lines[1], "manage: MySQL 9.7.0 at db.example.internal, database pulsenet_db")
-        self.assertEqual(lines[2], "manage: agent leo_ai, skill like_or_follow: dry_run (like 12)")
+        # The agents are off (no AGENTS_ENABLED), and a dry run still shows the tick.
+        self.assertEqual(lines[2], "manage: agents off (dry run only), today 4/20 turns")
+        self.assertEqual(lines[3], "manage: agent leo_ai, skill like_or_follow: dry_run (like 12)")
         self.assertFalse(conn.ran("insert"))
         self.assertEqual(conn.commits, 0)
         for secret in (ENV["DB_USER"], ENV["DB_PASSWORD"]):
             self.assertNotIn(secret, out + err)
 
-    def test_a_tick_likes_and_its_connections_are_utc(self):
+    def test_a_tick_likes_logs_its_turn_and_its_connections_are_utc(self):
         conn = self.likeable()
 
-        code, out, err = self.run_main(["agent-tick"], conn, ENV)
+        code, out, err = self.run_main(["agent-tick"], conn, ON)
 
         self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[-2], "manage: agents on, today 4/20 turns")
         self.assertEqual(out.splitlines()[-1], "manage: agent leo_ai, skill like_or_follow: liked (like 12)")
         self.assertEqual(conn.params_for("insert ignore into likes"), (131, 12))
+        self.assertEqual(conn.params_for("insert into agent_actions"), (131, "like_or_follow", "liked"))
         self.assertEqual(conn.commits, 1)
-        # The first connection only names the target; the tick's read and write are UTC.
+        # The first connection only names the target and counts; the tick's read and
+        # write are UTC.
         self.assertEqual([c.kwargs for c in self.connect.call_args_list],
                          [{}, {"time_zone": "+00:00"}, {"time_zone": "+00:00"}])
         self.assertTrue(conn.closed)
 
-    def test_a_named_agent_that_is_not_there(self):
-        conn = FakeConn(fetchone=[("9.7.0",), None])
+    def test_off_does_nothing_and_exits_0_for_the_timer(self):
+        for env in (ENV, {**ENV, "AGENTS_ENABLED": "0"}, {**ENV, "AGENTS_ENABLED": "off"}):
+            with self.subTest(enabled=env.get("AGENTS_ENABLED")):
+                conn = self.likeable()
 
-        code, out, _ = self.run_main(["agent-tick", "--agent", "rex_ai"], conn, ENV)
+                code, out, err = self.run_main(["agent-tick"], conn, env)
+
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, "manage: agents off (AGENTS_ENABLED is not on): nothing done\n")
+                self.connect.assert_not_called()     # no database, no LLM
+
+    def test_an_invalid_setting_exits_2_before_any_connection(self):
+        for env, name in (({**ENV, "AGENTS_ENABLED": "maybe"}, "AGENTS_ENABLED"),
+                          ({**ON, "AGENTS_MAX_ACTIONS_PER_DAY": "0"}, "AGENTS_MAX_ACTIONS_PER_DAY")):
+            with self.subTest(name):
+                code, out, err = self.run_main(["agent-tick"], self.likeable(), env)
+
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(f"manage: {name} must be", err)
+                self.connect.assert_not_called()
+
+    def test_the_cap_comes_from_the_setting_and_stops_the_tick(self):
+        conn = self.likeable(turns=5)
+
+        code, out, err = self.run_main(["agent-tick"], conn, {**ON, "AGENTS_MAX_ACTIONS_PER_DAY": "5"})
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines()[-2], "manage: agents on, today 5/5 turns")
+        self.assertEqual(out.splitlines()[-1], "manage: agent -, skill -: capped (today 5, max 5)")
+        self.assertFalse(conn.ran("insert"))
+
+    def test_a_named_agent_that_is_not_there(self):
+        conn = FakeConn(fetchone=[("9.7.0",), {"turns": 0}, {"turns": 0}, None])
+
+        code, out, _ = self.run_main(["agent-tick", "--agent", "rex_ai"], conn, ON)
 
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines()[-1], "manage: agent -, skill -: no_agent (asked rex_ai)")
         self.assertEqual(conn.params_for("username = %s"), ("rex_ai",))
 
     def test_with_the_llm_on_it_names_the_provider(self):
-        conn = FakeConn(fetchone=[("9.7.0",)], fetchall=[[AGENT_ROW]])
+        conn = FakeConn(fetchone=[("9.7.0",), {"turns": 0}, {"turns": 0}], fetchall=[[AGENT_ROW]])
 
-        code, out, err = self.run_main(["agent-tick", "--dry-run"], conn, {**ENV, "LLM_PROVIDER": "fake"})
+        code, out, err = self.run_main(["agent-tick", "--dry-run"], conn, {**ON, "LLM_PROVIDER": "fake"})
 
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines()[1], "manage: LLM fake (canned replies, no network)")
@@ -498,7 +538,7 @@ class AgentTickTests(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch.object(manage, "connect", side_effect=mysql.connector.Error("2003: Can't connect")), \
              patch.object(manage, "load_dotenv"), \
-             patch.dict(manage.os.environ, ENV, clear=True), \
+             patch.dict(manage.os.environ, ON, clear=True), \
              redirect_stdout(out), redirect_stderr(err):
             code = manage.main(["agent-tick"])
 
@@ -508,10 +548,21 @@ class AgentTickTests(unittest.TestCase):
     def test_a_db_error_after_the_target_line_closes_that_connection(self):
         conn = FakeConn(raise_on={"select version()": mysql.connector.Error("2013: Lost connection")})
 
-        code, _, err = self.run_main(["agent-tick"], conn, ENV)
+        code, _, err = self.run_main(["agent-tick"], conn, ON)
 
         self.assertEqual(code, 1)
         self.assertIn("Lost connection", err)
+        self.assertTrue(conn.closed)
+
+    def test_no_agent_actions_table_yet_exits_1(self):
+        # 008 not applied: the count fails like any DB error, before the tick.
+        conn = FakeConn(fetchone=[("9.7.0",)],
+                        raise_on={"from agent_actions": mysql.connector.Error("1146: Table doesn't exist")})
+
+        code, _, err = self.run_main(["agent-tick"], conn, ON)
+
+        self.assertEqual(code, 1)
+        self.assertIn("1146", err)
         self.assertTrue(conn.closed)
 
 

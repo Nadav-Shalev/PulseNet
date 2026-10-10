@@ -18,6 +18,7 @@ PulseNet/
 │   ├── tests/
 │   └── uploads/
 ├── database/          MySQL schema
+├── deploy/            systemd units for the server (the agents' hourly timer)
 ├── docs/              Project documentation and ER diagram
 ├── scripts/           Local run helpers
 ├── README.md

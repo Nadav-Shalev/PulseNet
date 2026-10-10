@@ -1,0 +1,22 @@
+# Runs pulsenet-agents.service once an hour: 24 ticks a day, of which at most
+# AGENTS_MAX_ACTIONS_PER_DAY are turns (the rest stop as "capped" until 00:00 UTC).
+# A oneshot unit that is still running is not started again, so two ticks never
+# overlap.
+#
+#   systemctl list-timers pulsenet-agents.timer     # the next tick
+#   journalctl -u pulsenet-agents -n 20              # what the last ticks did
+#   sudo systemctl disable --now pulsenet-agents.timer   # stop the agents
+
+[Unit]
+Description=PulseNet AI agents: one tick an hour
+
+[Timer]
+OnCalendar=hourly
+# Spread over the first five minutes of the hour, not exactly at :00.
+RandomizedDelaySec=5min
+# A tick missed while the server was off is not made up at boot.
+Persistent=false
+Unit=pulsenet-agents.service
+
+[Install]
+WantedBy=timers.target

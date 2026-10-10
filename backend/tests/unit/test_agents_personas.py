@@ -1,5 +1,6 @@
-"""The agents' fixed data: personas.py against migration 007, and the agents' limits
-and llm_usage purposes against the rest of the backend."""
+"""The agents' fixed data: personas.py against migration 007, the turn outcomes
+against migration 008 and schema.sql, and the agents' limits and llm_usage purposes
+against the rest of the backend."""
 
 import re
 import sys
@@ -16,9 +17,10 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
 import ai_assist  # noqa: E402
 import app  # noqa: E402
 import migrate  # noqa: E402
-from agents import PURPOSES, SKILLS, personas, skills  # noqa: E402
+from agents import OUTCOMES, PURPOSES, RECORDED, SKILLS, personas, skills  # noqa: E402
 
-MIGRATION = BACKEND_DIR.parent / "database" / "migrations" / "007_agents.sql"
+DATABASE_DIR = BACKEND_DIR.parent / "database"
+MIGRATION = DATABASE_DIR / "migrations" / "007_agents.sql"
 # One row of the INSERT: ('Name', 'username', 'email', 'bio', 'avatar', 'image', '', TRUE, 'persona')
 _ROW = re.compile(
     r"\(\s*'([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'[^']*',\s*'([^']+)',\s*'([^']+)',\s*'',\s*TRUE,\s*'([^']+)'\)"
@@ -66,6 +68,25 @@ class PersonaTests(unittest.TestCase):
     def test_an_unknown_agent_has_no_topics(self):
         self.assertEqual(personas.interests_of("someone_else"), ())
         self.assertEqual(personas.interests_of("ingrid_ai"), ("rust", "performance", "systems"))
+
+
+class TurnOutcomeTests(unittest.TestCase):
+    """agent_actions.outcome is an ENUM: an outcome tick.py records that it does not
+    list would make MySQL refuse the INSERT (strict mode), after the write."""
+
+    def enum_values(self, path):
+        sql = path.read_text(encoding="utf-8")
+        table = re.search(r"CREATE TABLE (?:IF NOT EXISTS )?agent_actions \((.*?)\n\);", sql, re.S).group(1)
+        values = re.search(r"outcome\s+ENUM\(([^)]*)\)", table).group(1)
+        return tuple(re.findall(r"'([a-z_]+)'", values))
+
+    def test_the_enum_is_what_a_tick_records(self):
+        for path in (DATABASE_DIR / "migrations" / "008_agent_actions.sql", DATABASE_DIR / "schema.sql"):
+            with self.subTest(path=path.name):
+                self.assertEqual(self.enum_values(path), RECORDED)
+
+    def test_a_tick_that_tried_nothing_is_not_a_turn(self):
+        self.assertEqual(set(OUTCOMES) - set(RECORDED), {"idle", "no_agent", "dry_run", "capped"})
 
 
 class LimitTests(unittest.TestCase):

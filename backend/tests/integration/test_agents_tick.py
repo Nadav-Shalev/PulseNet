@@ -93,6 +93,7 @@ class ReplyTests(TickTestCase):
         self.assertEqual(closed_at_call, [True, True])     # the read connection closed before the LLM
         self.assertEqual(self.write.params_for("insert into comments"),
                          (7, 131, 40, "Thanks, Ada! Hooks keep state next to the code that uses it."))
+        self.assertEqual(self.write.params_for("insert into agent_actions"), (131, "reply_to_human", "replied"))
         self.assertEqual((self.write.commits, self.write.closed), (1, True))
         self.assertEqual(self.purposes(), [("agent_reply_human", 131, "ok"), ("moderation", 131, "ok")])
         prompt, system = self.service.provider.calls[0]
@@ -161,6 +162,7 @@ class LikeFollowTests(TickTestCase):
 
         self.assertEqual((result.skill, result.outcome, result.detail), ("like_or_follow", "followed", {"follow": 3}))
         self.assertEqual(self.write.params_for("insert ignore into follows"), (131, 3))
+        self.assertEqual(self.write.params_for("insert into agent_actions"), (131, "like_or_follow", "followed"))
         self.assertEqual((self.write.commits, self.write.closed), (1, True))
         self.assertEqual(self.service.store.records, [])
 
@@ -191,29 +193,39 @@ class LikeFollowTests(TickTestCase):
 
 
 class NothingWrittenTests(TickTestCase):
+    """The text is not written, but the turn is: on a connection of its own, so the
+    agent goes to the back of the queue and the turn counts against the cap."""
+
     def reply_tick(self, *replies, daily_limit=100):
         connect = self.connections(FakeConn(fetchall=[[AGENT_ROW]], fetchone=[_waiting()]))
         self.llm(*replies, daily_limit=daily_limit)
         return self.tick(connect)
 
+    def assertOnlyTheTurn(self, outcome):
+        self.assertEqual(self.opened, 2)
+        self.assertEqual([params for _, params in self.write.executed],
+                         [(131, "reply_to_human", outcome)])
+        self.assertTrue(self.write.ran("insert into agent_actions"))
+        self.assertEqual((self.write.commits, self.write.closed), (1, True))
+
     def test_blocked_by_the_llm(self):
         result = self.reply_tick(COMMENT, TOXIC)
 
         self.assertEqual((result.outcome, result.detail["category"]), ("blocked", "harassment"))
-        self.assertEqual(self.opened, 1)          # no write connection at all
+        self.assertOnlyTheTurn("blocked")
 
     def test_blocked_by_the_word_list_when_the_verdict_is_unreadable(self):
         result = self.reply_tick('{"comment": "you idiot, read the docs"}', "I think it is fine")
 
         self.assertEqual((result.outcome, result.detail["category"]), ("blocked", "harassment"))
-        self.assertEqual(self.opened, 1)
+        self.assertOnlyTheTurn("blocked")
 
     def test_a_bad_reply_is_not_moderated_or_written(self):
         result = self.reply_tick("Sure, here is my reply!")
 
         self.assertEqual(result.outcome, "bad_reply")
         self.assertEqual(self.purposes(), [("agent_reply_human", 131, "ok")])
-        self.assertEqual(self.opened, 1)
+        self.assertOnlyTheTurn("bad_reply")
 
     def test_llm_failures(self):
         for error, name in ((LLMRateLimited("429", retry_after=30), "LLMRateLimited"),
@@ -221,7 +233,7 @@ class NothingWrittenTests(TickTestCase):
             with self.subTest(name):
                 result = self.reply_tick(error)
                 self.assertEqual((result.outcome, result.detail["error"]), ("llm_failed", name))
-                self.assertEqual(self.opened, 1)
+                self.assertOnlyTheTurn("llm_failed")
                 self.assertEqual(len(self.service.provider.calls), 1)       # no retry
 
     def test_the_daily_limit(self):
@@ -229,7 +241,7 @@ class NothingWrittenTests(TickTestCase):
 
         self.assertEqual((result.outcome, result.detail["error"]), ("llm_failed", "LLMLimitReached"))
         self.assertEqual(self.purposes(), [("agent_reply_human", 131, "over_limit")])
-        self.assertEqual(self.opened, 1)
+        self.assertOnlyTheTurn("llm_failed")
 
     def test_a_target_deleted_meanwhile(self):
         write = FakeConn(raise_on={"insert into comments": FkError(1452)})
@@ -239,7 +251,12 @@ class NothingWrittenTests(TickTestCase):
         result = self.tick(connect)
 
         self.assertEqual(result.outcome, "target_gone")
-        self.assertEqual((write.commits, write.rollbacks, write.closed), (0, 1, True))
+        # Rolled back, then the turn alone, committed.
+        self.assertEqual((write.commits, write.rollbacks, write.closed), (1, 1, True))
+        self.assertEqual(write.params_for("insert into agent_actions"), (131, "reply_to_human", "target_gone"))
+        sqls = [" ".join(sql.split()).lower() for sql, _ in write.executed]
+        self.assertTrue(sqls[0].startswith("insert into comments"))
+        self.assertTrue(sqls[1].startswith("insert into agent_actions"))
 
     def test_any_other_db_error_is_raised_and_the_connection_closed(self):
         write = FakeConn(raise_on={"insert into comments": FkError(1205)})
@@ -269,7 +286,7 @@ class AgentChoiceTests(TickTestCase):
 
         self.assertEqual((result.outcome, result.detail), ("no_agent", {"asked": "rex_ai"}))
         self.assertIn("NOT is_banned", self.read.find("username = %s")[0][0])
-        self.assertFalse(self.read.ran("order by id"))   # the list is never read
+        self.assertFalse(self.read.ran("left join agent_actions"))   # the list is never read
 
     def test_a_named_agent_acts(self):
         connect = self.connections(FakeConn(fetchone=[AGENT_ROW, _waiting()]))
@@ -286,8 +303,111 @@ class AgentChoiceTests(TickTestCase):
 
         result = self.tick(connect)
 
-        self.assertEqual((result.outcome, result.detail), ("idle", {}))
+        self.assertEqual((result.agent, result.outcome, result.detail), (None, "idle", {"tried": 1}))
+        self.assertEqual(self.opened, 1)          # an idle tick is not a turn: no row
+
+    def test_a_named_agent_with_nothing_to_do_is_named(self):
+        connect = self.connections(FakeConn(fetchone=[AGENT_ROW]))
+
+        result = self.tick(connect, service=None, agent="leo_ai")
+
+        self.assertEqual((result.agent, result.outcome), ("leo_ai", "idle"))
+        self.assertEqual(result.detail["tried"], 1)
+
+
+DANA_ROW = {"id": 133, "username": "dana_ai", "name": "Dana Levin", "personality": "You are Dana."}
+
+
+class TurnOrderTests(TickTestCase):
+    """Round robin: store.list_agents gives the order (its SQL is in
+    test_agents_skills); the tick acts with the first agent that finds something."""
+
+    def test_the_first_agent_in_turn_acts(self):
+        # Both could like a post: only the first one in the order does.
+        read = FakeConn(fetchall=[[DANA_ROW, AGENT_ROW], [], [{"id": 12}], [], [{"id": 14}]])
+        connect = self.connections(read)
+
+        result = self.tick(connect, service=None)
+
+        self.assertEqual((result.agent, result.outcome, result.detail), ("dana_ai", "liked", {"like": 12}))
+        self.assertEqual(self.write.params_for("insert into agent_actions"), (133, "like_or_follow", "liked"))
+        self.assertTrue(read.ran("order by max(a.id) is not null, max(a.id), u.id"))
+
+    def test_an_agent_with_nothing_to_do_lets_the_next_one_act(self):
+        # Dana has no one to follow and nothing to like; Leo likes post 14.
+        read = FakeConn(fetchall=[[DANA_ROW, AGENT_ROW], [], [], [], [{"id": 14}]])
+        connect = self.connections(read)
+
+        result = self.tick(connect, service=None)
+
+        self.assertEqual((result.agent, result.outcome), ("leo_ai", "liked"))
+        # Dana's triggers ran first, with her id; nothing is logged for her.
+        like_reads = [params for _, params in read.find("from posts p join users u")]
+        self.assertEqual([params[0] for params in like_reads], [133, 131])
+        self.assertEqual([params for _, params in self.write.find("insert into agent_actions")],
+                         [(131, "like_or_follow", "liked")])
+
+    def test_idle_only_when_no_agent_finds_anything(self):
+        read = FakeConn(fetchall=[[DANA_ROW, AGENT_ROW]])
+        connect = self.connections(read)
+
+        result = self.tick(connect, service=None)
+
+        self.assertEqual((result.agent, result.outcome), (None, "idle"))
+        self.assertEqual(result.detail["tried"], 2)
         self.assertEqual(self.opened, 1)
+
+    def test_the_turn_is_logged_in_the_same_commit_as_the_write(self):
+        class CommitLog(FakeConn):
+            def commit(self):
+                self.at_commit = [" ".join(sql.split()).lower()[:30] for sql, _ in self.executed]
+                super().commit()
+
+        write = CommitLog()
+        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [], [{"id": 12}]]), write)
+
+        self.tick(connect, service=None)
+
+        self.assertEqual(write.commits, 1)
+        self.assertEqual(write.at_commit, ["insert ignore into likes (user", "insert into agent_actions (age"])
+
+
+class DailyCapTests(TickTestCase):
+    def test_a_day_with_max_turns_is_capped_before_any_agent_is_read(self):
+        read = FakeConn(fetchone=[{"turns": 20}], fetchall=[[AGENT_ROW]])
+        connect = self.connections(read)
+        self.llm(COMMENT, CLEAN)
+
+        result = self.tick(connect, max_actions=20)
+
+        self.assertEqual((result.agent, result.skill, result.outcome), (None, None, "capped"))
+        self.assertEqual(result.detail, {"today": 20, "max": 20})
+        self.assertTrue(read.ran("from agent_actions where action_day = utc_date()"))
+        self.assertFalse(read.ran("left join agent_actions"))
+        self.assertEqual((self.service.provider.calls, self.opened), ([], 1))
+
+    def test_one_turn_left_runs(self):
+        connect = self.connections(FakeConn(fetchone=[{"turns": 19}], fetchall=[[AGENT_ROW], [], [{"id": 12}]]))
+
+        result = self.tick(connect, service=None, max_actions=20)
+
+        self.assertEqual(result.outcome, "liked")
+
+    def test_a_named_agent_is_capped_too(self):
+        read = FakeConn(fetchone=[{"turns": 3}, AGENT_ROW])
+        connect = self.connections(read)
+
+        result = self.tick(connect, service=None, agent="leo_ai", max_actions=3)
+
+        self.assertEqual(result.outcome, "capped")
+        self.assertFalse(read.ran("username = %s"))
+
+    def test_without_a_cap_the_count_is_not_read(self):
+        read = FakeConn(fetchall=[[AGENT_ROW], [], [{"id": 12}]])
+
+        self.tick(self.connections(read), service=None)
+
+        self.assertFalse(read.ran("count(*)"))
 
 
 class DryRunTests(TickTestCase):

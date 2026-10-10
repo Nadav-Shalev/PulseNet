@@ -1,10 +1,14 @@
 """One tick: one agent does at most one thing.
 
-    result = run_tick(llm_service, Moderator(llm_service), connect)
+    result = run_tick(llm_service, Moderator(llm_service), connect, max_actions=20)
     print(result.agent, result.skill, result.outcome)
 
-1. Read (one connection): pick an agent (at random, or the one named), then run the
-   skills' triggers in order (skills.SKILLS); the first that finds something wins.
+1. Read (one connection): with ``max_actions``, a day that already has that many
+   turns (agent_actions) stops here as ``capped``. Then the agents are tried in
+   turn order (store.list_agents: never acted first, then the oldest last turn), or
+   only the one named; for each, the skills' triggers run in order (skills.SKILLS),
+   and the first that finds something wins. An agent with nothing to do does not
+   hold up the next one, and keeps its place at the front of the queue.
    When the LLM is off (``service`` is None), every skill that needs it is skipped
    before its trigger runs, so only like_or_follow is tried. The connection is then
    closed, before any LLM call, so a slow model never holds one open.
@@ -15,6 +19,12 @@
    with no fallback and no retry.
 3. Act (a new connection): the INSERTs and one commit. A post or comment deleted
    in the meantime (MySQL 1452, a foreign key) is the outcome target_gone.
+
+Every turn (an outcome in RECORDED) is one agent_actions row: in the same commit as
+the write, or on a short connection of its own when nothing was written. So a turn
+that failed still sends its agent to the back of the queue and counts against the
+cap: its LLM calls were already spent. idle, dry_run, capped and no_agent are not
+turns, and leave no row.
 
 The result names the outcome; one pulsenet.agents log line per tick carries ids and
 sizes only, never text. No Flask, no app, no DB driver: the caller hands in
@@ -34,8 +44,10 @@ log = logging.getLogger("pulsenet.agents")
 
 FK_TARGET_MISSING = 1452   # MySQL ER_NO_REFERENCED_ROW_2
 
-OUTCOMES = ("posted", "commented", "replied", "liked", "followed", "idle", "no_agent",
-            "dry_run", "llm_failed", "bad_reply", "blocked", "target_gone")
+# The outcomes of a turn: agent_actions.outcome (a unit test holds the two equal).
+RECORDED = ("posted", "commented", "replied", "liked", "followed",
+            "llm_failed", "bad_reply", "blocked", "target_gone")
+OUTCOMES = RECORDED + ("idle", "no_agent", "dry_run", "capped")
 _DONE = {"reply_to_human": "replied", "reply_to_agent": "replied",
          "comment_trending": "commented", "write_post": "posted"}
 
@@ -47,16 +59,24 @@ class TickResult(NamedTuple):
     detail: dict             # ids, sizes, an error class or a moderation category
 
 
-def run_tick(service, moderator, connect, *, rng=None, agent=None, dry_run=False):
+class _Choice(NamedTuple):
+    outcome: Optional[str] = None    # set when the tick stops at the read
+    detail: dict = {}
+    agent: Optional[store.Agent] = None
+    skill: Optional[object] = None
+    found: object = None
+
+
+def run_tick(service, moderator, connect, *, rng=None, agent=None, dry_run=False, max_actions=None):
     """Run one tick and return its TickResult. ``rng`` (a random.Random) picks the
-    agent and the topic; ``agent`` (a username) forces the agent; ``dry_run`` makes
-    the reads and builds the prompt, with no LLM call and no write."""
+    topic and what to like or follow; ``agent`` (a username) forces the agent;
+    ``dry_run`` makes the reads and builds the prompt, with no LLM call and no write;
+    ``max_actions`` is the day's cap on turns (None: no cap)."""
     rng = rng or random.Random()
-    me, skill, found, skipped = _choose(service, connect, rng, agent)
-    if me is None:
-        return _done(None, None, "no_agent", {"asked": agent} if agent else {})
-    if skill is None:
-        return _done(me, None, "idle", {"skipped": skipped} if skipped else {})
+    choice = _choose(service, connect, rng, agent, max_actions)
+    me, skill, found = choice.agent, choice.skill, choice.found
+    if choice.outcome:
+        return _done(me, None, choice.outcome, choice.detail)
 
     if not skill.needs_llm:
         kind, target_id = found
@@ -73,63 +93,84 @@ def run_tick(service, moderator, connect, *, rng=None, agent=None, dry_run=False
         reply = service.complete(prompt, system=system, purpose=skill.purpose, user_id=me.id)
         content = skill.parse(reply)
     except LLMBadReply:
-        return _done(me, skill, "bad_reply", _ids(found))
+        return _failed(connect, me, skill, "bad_reply", _ids(found))
     except LLMError as exc:
-        return _done(me, skill, "llm_failed", {**_ids(found), "error": type(exc).__name__})
+        return _failed(connect, me, skill, "llm_failed", {**_ids(found), "error": type(exc).__name__})
 
     if isinstance(content, Comment):
         verdict = moderator.check_comment(content.text, user_id=me.id)
     else:
         verdict = moderator.check_post(content.title, content.body, content.tags, user_id=me.id)
     if verdict.blocked:
-        return _done(me, skill, "blocked", {**_ids(found), "category": verdict.category})
+        return _failed(connect, me, skill, "blocked", {**_ids(found), "category": verdict.category})
 
     return _act(connect, me, skill, lambda cursor: _write(cursor, me, found, content),
                 _DONE[skill.name], _ids(found))
 
 
-def _choose(service, connect, rng, username):
-    """(agent, skill, candidate, skipped skill names) from one read-only connection,
-    closed before returning."""
+def _choose(service, connect, rng, username, max_actions):
+    """The agent, skill and candidate of this tick, or the outcome it stops with,
+    from one read-only connection, closed before returning."""
     conn = connect()
     try:
         cursor = conn.cursor(dictionary=True)
+        if max_actions is not None:
+            turns = store.actions_today(cursor)
+            if turns >= max_actions:
+                return _Choice("capped", {"today": turns, "max": max_actions})
         if username:
             me = store.find_agent(cursor, username)
+            agents = [me] if me else []
         else:
             agents = store.list_agents(cursor)
-            me = rng.choice(agents) if agents else None
-        if me is None:
-            return None, None, None, []
-        skipped = []
-        for skill in SKILLS:
-            if skill.needs_llm and service is None:
-                skipped.append(skill.name)    # LLM off: not even its trigger runs
-                continue
-            found = skill.find(cursor, me, rng)
-            if found is not None:
-                return me, skill, found, skipped
-        return me, None, None, skipped
+        if not agents:
+            return _Choice("no_agent", {"asked": username} if username else {})
+        # LLM off: those skills' triggers do not even run.
+        skipped = [skill.name for skill in SKILLS if skill.needs_llm and service is None]
+        for me in agents:
+            for skill in SKILLS:
+                if skill.name in skipped:
+                    continue
+                found = skill.find(cursor, me, rng)
+                if found is not None:
+                    return _Choice(agent=me, skill=skill, found=found)
+        detail = {"tried": len(agents), **({"skipped": skipped} if skipped else {})}
+        return _Choice("idle", detail, agent=agents[0] if username else None)
     finally:
         conn.close()
 
 
 def _act(connect, me, skill, write, outcome, detail):
-    """Run ``write(cursor)`` in a new connection and commit; 1452 -> target_gone."""
+    """Run ``write(cursor)`` and log the turn in a new connection, in one commit;
+    1452 -> target_gone (rolled back, then logged)."""
     conn = connect()
     try:
         cursor = conn.cursor()
         try:
             new_ids = write(cursor) or {}
+            store.record_action(cursor, me.id, skill.name, outcome)
             conn.commit()
         except Exception as exc:
             if getattr(exc, "errno", None) != FK_TARGET_MISSING:
                 raise
             conn.rollback()
+            store.record_action(cursor, me.id, skill.name, "target_gone")
+            conn.commit()
             return _done(me, skill, "target_gone", detail)
         return _done(me, skill, outcome, {**detail, **new_ids})
     finally:
         conn.close()
+
+
+def _failed(connect, me, skill, outcome, detail):
+    """A turn that wrote nothing: log it on a short connection of its own."""
+    conn = connect()
+    try:
+        store.record_action(conn.cursor(), me.id, skill.name, outcome)
+        conn.commit()
+    finally:
+        conn.close()
+    return _done(me, skill, outcome, detail)
 
 
 def _like_or_follow(cursor, me, kind, target_id):
