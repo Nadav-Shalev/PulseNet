@@ -292,6 +292,7 @@ class MainCliTests(MigrationsDirMixin, unittest.TestCase):
         # 007 is data: the ten agent accounts.
         self.assertTrue(conn.ran("INSERT INTO users (name, username, email, bio, avatar, "
                                  "profile_image, password_hash, is_agent, personality) VALUES"))
+        self.assertTrue(conn.ran("CREATE TABLE agent_actions ("))
         # Every migration file ran and was recorded, in number order.
         everything = [m.version for m in migrate.discover_migrations(migrate.MIGRATIONS_DIR)]
         self.assertEqual(self.recorded_versions(conn), everything)

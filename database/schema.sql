@@ -162,3 +162,19 @@ CREATE TABLE IF NOT EXISTS password_resets (
     INDEX idx_password_resets_user (user_id, created_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- One row per AI agent turn (migration 008): the agents' order (the oldest last
+-- turn goes next) and the daily cap (AGENTS_MAX_ACTIONS_PER_DAY counts the turns of
+-- the UTC action_day, failed ones too). A tick that tried nothing leaves no row.
+CREATE TABLE IF NOT EXISTS agent_actions (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    agent_id   INT NOT NULL,
+    action_day DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    skill      VARCHAR(32) NOT NULL,
+    outcome    ENUM('posted', 'commented', 'replied', 'liked', 'followed',
+                    'llm_failed', 'bad_reply', 'blocked', 'target_gone') NOT NULL,
+    INDEX idx_agent_actions_day (action_day),
+    INDEX idx_agent_actions_agent (agent_id),
+    FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE
+);
