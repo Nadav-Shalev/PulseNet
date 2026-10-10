@@ -30,14 +30,18 @@ class Agent(NamedTuple):
     username: str
     name: str
     personality: Optional[str]
+    last_skill: Optional[str] = None   # the skill of its last turn (skills.skill_order)
 
 
-_AGENT_SELECT = ("SELECT id, username, name, personality FROM users "
-                 "WHERE is_agent AND NOT is_banned")
+# The skill of the agent's newest turn, a correlated subquery on users u.
+_LAST_SKILL = ("(SELECT la.skill FROM agent_actions la WHERE la.agent_id = u.id "
+               "ORDER BY la.id DESC LIMIT 1) AS last_skill")
+_AGENT_SELECT = (f"SELECT u.id, u.username, u.name, u.personality, {_LAST_SKILL} FROM users u "
+                 "WHERE u.is_agent AND NOT u.is_banned")
 
 
 def _agent(row):
-    return Agent(row["id"], row["username"], row["name"], row["personality"])
+    return Agent(row["id"], row["username"], row["name"], row["personality"], row.get("last_skill"))
 
 
 def list_agents(cursor):
@@ -46,7 +50,7 @@ def list_agents(cursor):
     Turn ids grow with time, so the oldest last turn is the smallest MAX(id). An
     agent an admin banned is left out."""
     cursor.execute(
-        "SELECT u.id, u.username, u.name, u.personality FROM users u "
+        f"SELECT u.id, u.username, u.name, u.personality, {_LAST_SKILL} FROM users u "
         "LEFT JOIN agent_actions a ON a.agent_id = u.id "
         "WHERE u.is_agent AND NOT u.is_banned "
         "GROUP BY u.id, u.username, u.name, u.personality "
@@ -57,7 +61,7 @@ def list_agents(cursor):
 
 def find_agent(cursor, username):
     """The agent named ``username``, or None (no such agent, or banned)."""
-    cursor.execute(_AGENT_SELECT + " AND username = %s", (username,))
+    cursor.execute(_AGENT_SELECT + " AND u.username = %s", (username,))
     row = cursor.fetchone()
     return _agent(row) if row else None
 
@@ -122,22 +126,26 @@ def trending_tags(cursor):
 def post_to_comment(cursor, agent_id, topics, interests):
     """A recent post by someone else, tagged with one of ``topics``, that the agent
     has not commented on, as a dict, or None. Posts that carry one of ``interests``
-    come first, then the newest."""
+    come first, then those with the fewest agent comments (so agents spread out
+    instead of all answering the same post), then the newest by created_at: ids do
+    not follow time for posts seeded with an age (demo_content)."""
     if not topics:
         return None
     marks = ", ".join(["%s"] * len(topics))
     score = f"MAX(t.name IN ({', '.join(['%s'] * len(interests))}))" if interests else "0"
     cursor.execute(
         f"SELECT p.id AS post_id, p.title AS post_title, p.body AS post_body, "
-        f"u.username AS post_author, {score} AS interest_hit "
+        f"u.username AS post_author, {score} AS interest_hit, "
+        "(SELECT COUNT(*) FROM comments ac JOIN users au ON au.id = ac.author_id "
+        "WHERE ac.post_id = p.id AND au.is_agent) AS agent_comments "
         "FROM posts p JOIN users u ON u.id = p.author_id "
         "JOIN posts_tags pt ON pt.post_id = p.id JOIN tags t ON t.id = pt.tag_id "
         f"WHERE p.created_at >= NOW() - INTERVAL {COMMENT_WINDOW_HOURS} HOUR "
         "AND p.author_id <> %s AND NOT u.is_banned "
         f"AND t.name IN ({marks}) "
         "AND NOT EXISTS (SELECT 1 FROM comments mine WHERE mine.post_id = p.id AND mine.author_id = %s) "
-        "GROUP BY p.id, p.title, p.body, u.username "
-        "ORDER BY interest_hit DESC, p.id DESC LIMIT 1",
+        "GROUP BY p.id, p.title, p.body, u.username, p.created_at "
+        "ORDER BY interest_hit DESC, agent_comments, p.created_at DESC, p.id DESC LIMIT 1",
         (*interests, agent_id, *topics, agent_id),
     )
     return cursor.fetchone()

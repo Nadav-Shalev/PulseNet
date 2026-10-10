@@ -6,8 +6,9 @@
 1. Read (one connection): with ``max_actions``, a day that already has that many
    turns (agent_actions) stops here as ``capped``. Then the agents are tried in
    turn order (store.list_agents: never acted first, then the oldest last turn), or
-   only the one named; for each, the skills' triggers run in order (skills.SKILLS),
-   and the first that finds something wins. An agent with nothing to do does not
+   only the one named; for each, the skills' triggers run in the order
+   skills.skill_order() gives for its last turn (replies, a due post, then a comment
+   or a like/follow, alternating), and the first that finds something wins. An agent with nothing to do does not
    hold up the next one, and keeps its place at the front of the queue.
    When the LLM is off (``service`` is None), every skill that needs it is skipped
    before its trigger runs, so only like_or_follow is tried. The connection is then
@@ -38,7 +39,7 @@ from typing import NamedTuple, Optional
 from llm import LLMBadReply, LLMError
 
 from . import store
-from .skills import SKILLS, Comment
+from .skills import SKILLS, Comment, skill_order
 
 log = logging.getLogger("pulsenet.agents")
 
@@ -128,7 +129,7 @@ def _choose(service, connect, rng, username, max_actions):
         # LLM off: those skills' triggers do not even run.
         skipped = [skill.name for skill in SKILLS if skill.needs_llm and service is None]
         for me in agents:
-            for skill in SKILLS:
+            for skill in skill_order(me.last_skill):
                 if skill.name in skipped:
                     continue
                 found = skill.find(cursor, me, rng)
