@@ -13,6 +13,8 @@ and the daily cap. The caller commits.
 
 from typing import NamedTuple, Optional
 
+import recommend
+
 REPLY_WINDOW_HOURS = 72      # a comment older than this is not answered any more
 COMMENT_WINDOW_HOURS = 48    # posts an agent may comment on
 TRENDING_DAYS = 7            # trending tags count the posts of this window
@@ -112,15 +114,9 @@ def waiting_comment(cursor, agent_id, *, by_agent, max_agent_turns=None):
 
 
 def trending_tags(cursor):
-    """The TRENDING_LIMIT tags on the most posts of the last TRENDING_DAYS days."""
-    cursor.execute(
-        "SELECT t.name FROM posts_tags pt "
-        "JOIN tags t ON t.id = pt.tag_id JOIN posts p ON p.id = pt.post_id "
-        f"WHERE p.created_at >= NOW() - INTERVAL {TRENDING_DAYS} DAY "
-        "GROUP BY t.id, t.name ORDER BY COUNT(*) DESC, t.name LIMIT %s",
-        (TRENDING_LIMIT,),
-    )
-    return [row["name"] for row in cursor.fetchall()]
+    """The names of the TRENDING_LIMIT tags on the most posts of the last
+    TRENDING_DAYS days: the home page's "trending" (recommend.py), over a week."""
+    return [row["name"] for row in recommend.trending_tags(cursor, TRENDING_DAYS * 24, TRENDING_LIMIT)]
 
 
 def post_to_comment(cursor, agent_id, topics, interests):

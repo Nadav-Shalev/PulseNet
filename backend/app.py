@@ -23,6 +23,7 @@ import llm
 import mailer
 import moderation
 import password_reset
+import recommend
 
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -167,6 +168,22 @@ def _str_field(data, key, strip=True):
     if not isinstance(value, str):
         raise InputError(f"{key} must be a string")
     return value.strip() if strip else value
+
+
+def _int_arg(name, default, low, high):
+    """Query parameter ``name`` as a whole number from ``low`` to ``high``, or
+    ``default`` when it is missing or empty. Anything else raises InputError (400),
+    instead of quietly answering for a different value."""
+    raw = (request.args.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = None
+    if value is None or not low <= value <= high:
+        raise InputError(f"{name} must be a whole number from {low} to {high}")
+    return value
 
 
 # ─── Auth: session helpers & require_session decorator ───────────────────────
@@ -1985,6 +2002,31 @@ def search_users():
         return jsonify(mock_search_users(q, limit, offset))
 
 
+# ─── GET /api/users/suggested ─────────────────────────────────────────────────
+
+SUGGESTED_DEFAULT_LIMIT, SUGGESTED_MAX_LIMIT = 5, 10
+
+
+@app.route("/api/users/suggested")
+def get_suggested_users():
+    """Who to follow, for the home page (recommend.py): friends of friends, then
+    people who write on the same tags, then the most followed. Public: a guest gets
+    the most followed. Never the viewer, someone they follow, a banned user or an
+    email. (This fixed path wins over /api/users/<username>.)"""
+    limit  = _int_arg("limit", SUGGESTED_DEFAULT_LIMIT, 1, SUGGESTED_MAX_LIMIT)
+    viewer = _current_user_from_cookie()
+    try:
+        conn = get_db_connection()
+        try:
+            users = recommend.suggested_users(conn.cursor(dictionary=True),
+                                              viewer["id"] if viewer else None, limit)
+        finally:
+            conn.close()
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+    return jsonify(users)
+
+
 # ─── GET /api/users (list with post counts) ───────────────────────────────────
 
 @app.route("/api/users")
@@ -2189,6 +2231,29 @@ def search_tags():
         return jsonify(rows)
     except Exception as exc:
         return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+
+
+# ─── GET /api/tags/trending ───────────────────────────────────────────────────
+
+TRENDING_DEFAULT_HOURS, TRENDING_MAX_HOURS = 24, 7 * 24
+TRENDING_DEFAULT_LIMIT, TRENDING_MAX_LIMIT = 10, 20
+
+
+@app.route("/api/tags/trending")
+def get_trending_tags():
+    """The tags on the most posts of the last ``hours`` hours (default 24, at most a
+    week), as ``[{name, post_count}]``, for the home page (recommend.py)."""
+    hours = _int_arg("hours", TRENDING_DEFAULT_HOURS, 1, TRENDING_MAX_HOURS)
+    limit = _int_arg("limit", TRENDING_DEFAULT_LIMIT, 1, TRENDING_MAX_LIMIT)
+    try:
+        conn = get_db_connection()
+        try:
+            rows = recommend.trending_tags(conn.cursor(dictionary=True), hours, limit)
+        finally:
+            conn.close()
+    except Exception as exc:
+        return jsonify({"error": "Database unavailable", "detail": str(exc)}), 503
+    return jsonify([{"name": row["name"], "post_count": row["post_count"]} for row in rows])
 
 
 # ─── GET /api/test-db ─────────────────────────────────────────────────────────

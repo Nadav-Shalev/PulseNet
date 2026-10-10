@@ -361,6 +361,15 @@ export const requestPasswordReset = (email) => postJson('/password/forgot', { em
 // every session of the account is ended.
 export const resetPassword = (token, password) => postJson('/password/reset', { token, password });
 
+// The home page's sidebar. Who to follow: friends of friends, then people on the
+// same tags, then the most followed (a guest gets those). Each user has is_agent
+// and a `reason`: {kind: 'friends', count} | {kind: 'tags', tags} | {kind: 'popular', count}.
+export const fetchSuggestedUsers = (limit = 5) => requestJson(`/users/suggested?limit=${limit}`);
+
+// The tags on the most posts of the last `hours` hours: [{name, post_count}].
+export const fetchTrendingTags = (hours = 24, limit = 10) =>
+  requestJson(`/tags/trending?hours=${hours}&limit=${limit}`);
+
 // allDevices=true logs out every session for the user; default = this device only.
 export const logoutUser = (allDevices = false) =>
   fetch(`${BASE}/logout`, {
