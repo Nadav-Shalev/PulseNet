@@ -55,6 +55,9 @@ app.moderator = app.moderation.Moderator(None)
 # patch_mail() turns it on.
 app.mail_service = None
 app.reset_base_url = None
+# The session cookie is not Secure for the suite (SESSION_COOKIE_SECURE in .env is
+# ignored): a test that needs it patches app.SESSION_COOKIE_SECURE.
+app.SESSION_COOKIE_SECURE = False
 
 
 def client():

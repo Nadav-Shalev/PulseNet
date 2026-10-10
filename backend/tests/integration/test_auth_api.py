@@ -205,6 +205,58 @@ class LogoutTests(unittest.TestCase):
         self.assertIn("session_id=;", _set_cookie_header(resp))
 
 
+class SecureCookieTests(unittest.TestCase):
+    """SESSION_COOKIE_SECURE (on in production, over HTTPS): the cookie is set and
+    cleared with Secure, so the browser never sends it over plain HTTP."""
+
+    def _login(self):
+        conn = FakeConn(fetchone=[_login_row()])
+        with patch_db(conn):
+            return client().post("/api/login",
+                                 json={"email": "ada@example.com", "password": PASSWORD})
+
+    def _logout(self):
+        conn = FakeConn(fetchone=[_session_user()])
+        c = client()
+        c.set_cookie("session_id", "this-sid")
+        with patch_db(conn):
+            return c.post("/api/logout")
+
+    def _stale_cookie(self):
+        conn = FakeConn(fetchone=[None])                     # the session is gone
+        c = client()
+        c.set_cookie("session_id", "stale-sid")
+        with patch_db(conn):
+            return c.get("/api/me")
+
+    def test_off_no_secure_attribute(self):
+        with patch.object(app, "SESSION_COOKIE_SECURE", False):
+            for name, send in (("login", self._login), ("logout", self._logout),
+                               ("stale", self._stale_cookie)):
+                with self.subTest(name):
+                    self.assertNotIn("Secure", _set_cookie_header(send()))
+
+    def test_on_login_sets_a_secure_cookie(self):
+        with patch.object(app, "SESSION_COOKIE_SECURE", True):
+            resp = self._login()
+
+        self.assertEqual(resp.status_code, 200)
+        cookie = _set_cookie_header(resp)
+        self.assertNotIn("session_id=;", cookie)
+        for attribute in ("Secure", "HttpOnly", "SameSite=Lax", "Path=/"):
+            self.assertIn(attribute, cookie)
+
+    def test_on_every_clear_is_secure_too(self):
+        # The clear must match the attributes it was set with.
+        with patch.object(app, "SESSION_COOKIE_SECURE", True):
+            for name, send in (("logout", self._logout), ("stale", self._stale_cookie)):
+                with self.subTest(name):
+                    cookie = _set_cookie_header(send())
+                    self.assertIn("session_id=;", cookie)
+                    self.assertIn("Secure", cookie)
+                    self.assertIn("HttpOnly", cookie)
+
+
 class BannedUserTests(unittest.TestCase):
     """A ban (POST /api/admin/users/<id>/ban) deletes the user's sessions; these are
     the other two locks: login refuses them, and a session row never counts."""
