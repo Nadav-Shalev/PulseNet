@@ -1,12 +1,17 @@
-# Continuous integration: the same checks as `scripts/check.sh` (without --e2e),
-# run on every push to main and on every pull request.
+# Continuous integration: the same checks as `scripts/check.sh`, plus the full
+# Cypress suite on the docker compose stack, on every push to main and on every
+# pull request.
 #
 # - backend: unit + integration tests under coverage, then `coverage report`, which
 #   fails below `fail_under` in backend/.coveragerc. Runs on Python 3.9 (the EC2
 #   production runtime) and 3.13 (local development). The tests use the FakeConn
 #   DB double, so no MySQL service is needed.
-# - frontend: ESLint and the production build. The Cypress binary is not downloaded;
-#   E2E is not run in CI yet.
+# - frontend: ESLint and the production build. The Cypress binary is not downloaded.
+# - e2e: every Cypress spec against `docker compose` (docker-compose.yml with
+#   docker-compose.e2e.yml): MySQL 8.4 migrated from scratch, gunicorn, and nginx
+#   with the production build, as on the EC2. The LLM is the offline fake; no
+#   secret is used. frontend/scripts/e2e-docker.mjs runs it, the same command as
+#   locally (npm run test:e2e:docker).
 
 name: CI
 
@@ -88,3 +93,50 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  e2e:
+    name: e2e (Cypress on docker compose)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm's cache holds the package, not the ~200 MB binary it downloads.
+      - name: Cache the Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The stack `docker compose up` starts: valid, and no production secret in
+      # what it resolves to (the E2E run then checks its own files with --strict).
+      # The runner's python3 is enough: the script uses the standard library only.
+      - name: Compose preflight
+        working-directory: .
+        run: python3 scripts/compose_preflight.py
+
+      - name: Cypress on the compose stack
+        run: npm run test:e2e:docker
+
+      - name: Upload logs and screenshots
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs
+          path: |
+            frontend/cypress/logs/
+            frontend/cypress/screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
