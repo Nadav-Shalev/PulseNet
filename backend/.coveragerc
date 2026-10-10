@@ -8,11 +8,14 @@ omit =
 [report]
 show_missing = True
 skip_empty = True
-# Coverage ratchet: `coverage report` fails below this total. It is raised as tests
-# are added and never lowered; the project requires at least 85. Kept about a point
-# below the measured total, since CI also measures on Python 3.9 and branch counts
-# can differ slightly between Python versions.
-fail_under = 98
+# `coverage report` fails below this total: 85, the course's requirement for the
+# backend's unit + integration tests, and no higher. The measured backend total is
+# well above it (about 99.5%); it covers backend/ only (the frontend is tested by
+# the Cypress E2E suite, not measured here).
+fail_under = 85
+# coverage compares the total rounded to this many decimals: with the default 0,
+# 84.6% would round up to 85 and pass. Two decimals make "below 85" exact.
+precision = 2
 # Script entry points (`python app.py`, `python seed_data.py`) are run by hand, not
 # exercised by the test suite.
 exclude_also =

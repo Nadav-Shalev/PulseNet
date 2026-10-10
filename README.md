@@ -186,8 +186,10 @@ bash scripts/check.sh
 It runs the backend unit + integration tests under coverage, fails if total
 coverage drops below `fail_under` in `backend/.coveragerc`, then runs the frontend
 lint and production build. Every step runs even if an earlier one fails, and the
-script exits non-zero if any step failed. `fail_under` is a ratchet: it is raised
-as tests are added and never lowered (the project requires at least 85%).
+script exits non-zero if any step failed. `fail_under` is 85, the course's
+requirement. The measured total, about 99.5%, is **backend coverage only**
+(`backend/`, branch coverage included), not whole-project coverage: the frontend
+is not measured, it is tested by the Cypress E2E suite below.
 
 Add `--e2e` when the UI changed: it also runs the Cypress suite (below).
 

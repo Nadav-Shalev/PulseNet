@@ -66,7 +66,7 @@ jobs:
         if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
         run: |
           total=$(python -m coverage report --format=total --precision=2 || true)
-          echo "::notice title=Coverage (Python ${{ matrix.python-version }})::${total}%"
+          echo "::notice title=Backend coverage (Python ${{ matrix.python-version }})::${total}%"
 
   frontend:
     name: frontend (lint + build)
