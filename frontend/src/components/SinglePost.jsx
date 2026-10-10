@@ -1,5 +1,8 @@
-import { useContext, useState } from 'react';
+import { useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Alert from '@mui/material/Alert';
+import Link from '@mui/material/Link';
+import { Link as RouterLink } from 'react-router-dom';
 import Card from '@mui/material/Card';
 import CardActions from '@mui/material/CardActions';
 import CardContent from '@mui/material/CardContent';
@@ -43,6 +46,10 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const [open, setOpen] = useState(false);
   const [fullHtml, setFullHtml] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const detailRequest = useRef(0);
+  const detailPending = useRef(false);
+  useEffect(() => () => { detailRequest.current++; }, [post.id]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tagBusy, setTagBusy] = useState(null);
@@ -64,11 +71,18 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
 
   const handleOpen = async () => {
     setOpen(true);
-    if (!fullHtml) {
-      setLoading(true);
+    if (fullHtml !== null || detailPending.current) return;
+    const request = ++detailRequest.current;
+    detailPending.current = true;
+    setLoading(true);
+    setDetailError('');
+    try {
       const article = await fetchArticleById(post.id);
-      setFullHtml(article.body_html);
-      setLoading(false);
+      if (request === detailRequest.current) setFullHtml(article.body_html || '');
+    } catch (err) {
+      if (request === detailRequest.current) setDetailError(err.message || 'Could not load this post.');
+    } finally {
+      if (request === detailRequest.current) { detailPending.current = false; setLoading(false); }
     }
   };
 
@@ -130,9 +144,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const metaLine = authorName && authorUsername
     ? `@${authorUsername} · ${postTimeAgo(post)}`
     : postTimeAgo(post);
-  const goToAuthor = () => {
-    if (authorUsername) navigate(`/profile/${encodeURIComponent(authorUsername)}`);
-  };
+  const authorPath = authorUsername ? `/profile/${encodeURIComponent(authorUsername)}` : undefined;
   const goToTag = (tag) => navigate(`/tag/${encodeURIComponent(tag)}`);
 
   return (
@@ -162,23 +174,28 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
             <Avatar
               src={post?.user?.profile_image}
               alt={post?.user?.name}
-              onClick={goToAuthor}
+              component={authorPath ? RouterLink : 'div'}
+              to={authorPath}
+              aria-label={authorPath ? `View ${displayName}'s profile` : undefined}
               sx={{ cursor: authorUsername ? 'pointer' : 'default' }}
             >
               {post?.user?.name?.[0] ?? '?'}
             </Avatar>
           }
           title={
-            <Box
-              component="span"
-              onClick={goToAuthor}
+            <Link
+              component={authorPath ? RouterLink : 'span'}
+              to={authorPath}
+              color="text.primary"
+              underline="hover"
               sx={{
+                fontWeight: 600,
                 cursor: authorUsername ? 'pointer' : 'default',
                 '&:hover': authorUsername ? { textDecoration: 'underline' } : undefined,
               }}
             >
               {displayName}
-            </Box>
+            </Link>
           }
           subheader={metaLine}
           slotProps={{ subheader: { 'data-testid': 'post-meta' } }}
@@ -205,7 +222,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
           }
         />
         <CardContent sx={{ flexGrow: 1 }}>
-          <Typography variant="h6" component="div" gutterBottom>
+          <Typography variant="h6" component="h2" gutterBottom>
             {post?.title || 'Untitled'}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -237,7 +254,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
             {manageError || 'Managing post — remove tags with ✕, or delete the post.'}
           </Typography>
         )}
-        <CardActions sx={{ justifyContent: 'center', gap: 1 }}>
+        <CardActions sx={{ px: 2, pb: 2, flexWrap: 'wrap', gap: 0.5, '& > :not(style) ~ :not(style)': { ml: 0 } }}>
           <Button variant="contained" size="small" onClick={handleOpen}>
             Read More
           </Button>
@@ -356,6 +373,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
       </Dialog>
 
       <Dialog
+        aria-labelledby={`post-title-${post.id}`}
         open={open}
         onClose={() => setOpen(false)}
         maxWidth="md"
@@ -364,9 +382,10 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
         scroll="paper"
         data-testid="post-dialog"
       >
-        <DialogTitle sx={{ pr: 6 }}>
+        <DialogTitle id={`post-title-${post.id}`} sx={{ pr: 6 }}>
           {post?.title}
           <IconButton
+            aria-label="Close post"
             onClick={() => setOpen(false)}
             sx={{ position: 'absolute', right: 8, top: 8 }}
           >
@@ -377,18 +396,13 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
         <DialogContent dividers>
           {loading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress />
+              <CircularProgress aria-label="Loading post" />
             </Box>
+          ) : detailError ? (
+            <Alert severity="error" action={<Button color="inherit" onClick={handleOpen}>Retry</Button>}>{detailError}</Alert>
           ) : (
             <Box
-              sx={{
-                '& img': { maxWidth: '100%', height: 'auto', display: 'block', my: 1 },
-                '& pre': { overflowX: 'auto', p: 2, bgcolor: '#f5f5f5', borderRadius: 1 },
-                overflowWrap: 'anywhere',
-                '& code': { fontSize: '0.85em' },
-                '& h1,& h2,& h3': { mt: 2, mb: 1 },
-                lineHeight: 1.7,
-              }}
+              className="rich-text"
               dangerouslySetInnerHTML={{ __html: fullHtml || '' }}
             />
           )}

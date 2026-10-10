@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import Alert from '@mui/material/Alert';
 import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
@@ -42,6 +42,7 @@ function CommentForm({ value, onChange, onSubmit, onCancel, busy, label, placeho
         multiline
         minRows={2}
         size="small"
+        label={parentId ? 'Your reply' : 'Your comment'}
         placeholder={placeholder}
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -193,7 +194,9 @@ export default function CommentsSection({ postId, onCountChange }) {
         <Avatar
           src={c.user?.profile_image}
           alt={c.user?.name}
-          onClick={() => username && navigate(`/profile/${encodeURIComponent(username)}`)}
+          component={username ? RouterLink : 'div'}
+          to={username ? `/profile/${encodeURIComponent(username)}` : undefined}
+          aria-label={username ? `View @${username}'s profile` : undefined}
           sx={{ width: 32, height: 32, cursor: username ? 'pointer' : 'default' }}
         >
           {c.user?.name?.[0] ?? '?'}
@@ -202,7 +205,7 @@ export default function CommentsSection({ postId, onCountChange }) {
           {/* The report and delete buttons keep their own column, so a wrapped name
               line on a phone does not push them onto a line of their own. */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-            <Box sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 1 }}>
+            <Box sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 1 }}>
               <Typography variant="subtitle2" component="span">
                 {c.user?.name?.trim() || `@${username}`}
               </Typography>
@@ -242,6 +245,7 @@ export default function CommentsSection({ postId, onCountChange }) {
             component="div"
             variant="body2"
             data-testid="comment-body"
+            className="rich-text"
             sx={{ overflowWrap: 'anywhere', '& p': { m: 0 }, '& pre': { overflowX: 'auto' } }}
             dangerouslySetInnerHTML={{ __html: c.body_html }}
           />

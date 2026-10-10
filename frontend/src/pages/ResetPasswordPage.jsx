@@ -32,6 +32,7 @@ export default function ResetPasswordPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (submitting || !token) return;
     setError('');
     if (!password) {
       setError('Choose a new password.');
@@ -56,7 +57,7 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 0, sm: 3 } }}>
       <Card sx={{ maxWidth: 420, width: '100%' }}>
         <CardContent
           component="form"
@@ -64,7 +65,7 @@ export default function ResetPasswordPage() {
           onSubmit={handleSubmit}
           sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}
         >
-          <Typography variant="h5" fontWeight={700}>Choose a new password</Typography>
+          <Typography variant="h5" component="h1" fontWeight={700}>Choose a new password</Typography>
           <Typography variant="body2" color="text.secondary">
             You will be logged out everywhere, then log in with the new password.
           </Typography>
@@ -76,6 +77,9 @@ export default function ResetPasswordPage() {
               <TextField
                 label="New password"
                 type="password"
+                autoComplete="new-password"
+                required
+                disabled={submitting}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 slotProps={{ htmlInput: { 'data-testid': 'reset-password' } }}
@@ -84,6 +88,9 @@ export default function ResetPasswordPage() {
               <TextField
                 label="Repeat new password"
                 type="password"
+                autoComplete="new-password"
+                required
+                disabled={submitting}
                 value={repeat}
                 onChange={e => setRepeat(e.target.value)}
                 slotProps={{ htmlInput: { 'data-testid': 'reset-repeat-password' } }}

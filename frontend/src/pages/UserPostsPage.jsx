@@ -7,8 +7,8 @@ export default function UserPostsPage() {
   const { username } = useParams();
 
   return (
-    <Box sx={{ padding: 2 }}>
-      <Typography variant="h5" gutterBottom>
+    <Box>
+      <Typography variant="h5" component="h1" gutterBottom>
         Posts by @{username}
       </Typography>
       <Feed username={username} />

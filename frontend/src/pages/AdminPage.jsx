@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState, useRef } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -101,19 +101,27 @@ function ReportsTab({ confirm }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const requestId = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++requestId.current;
+    setLoading(true);
     setError('');
     try {
-      setReports(await fetchReports(status));
+      const rows = await fetchReports(status);
+      if (request === requestId.current) setReports(rows);
     } catch (err) {
-      setError(err.message || 'Could not load the reports.');
+      if (request === requestId.current) setError(err.message || 'Could not load the reports.');
     } finally {
-      setLoading(false);
+      if (request === requestId.current) setLoading(false);
     }
   }, [status]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const request = requestId.current;
+    return () => { requestId.current = request + 1; };
+  }, [load]);
 
   const run = async (action) => {
     setBusy(true);
@@ -157,19 +165,21 @@ function ReportsTab({ confirm }) {
   return (
     <Box>
       <ToggleButtonGroup
+        aria-label="Report status"
+        disabled={busy}
         exclusive
         size="small"
         value={status}
-        onChange={(_, v) => { if (v) { setLoading(true); setStatus(v); } }}
+        onChange={(_, v) => { if (v && v !== status) { requestId.current++; setLoading(true); setStatus(v); } }}
         sx={{ mb: 2 }}
       >
         <ToggleButton value="open" data-testid="reports-open">Open</ToggleButton>
         <ToggleButton value="resolved" data-testid="reports-resolved">Dismissed</ToggleButton>
       </ToggleButtonGroup>
-      {error && <Alert severity="error" sx={{ mb: 2 }} data-testid="admin-error">{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} data-testid="admin-error" action={<Button color="inherit" onClick={load} disabled={loading || busy}>Retry</Button>}>{error}</Alert>}
       {loading ? (
         <Typography color="text.secondary">Loading reports...</Typography>
-      ) : reports.length === 0 ? (
+      ) : !error && reports.length === 0 ? (
         <Typography color="text.secondary" data-testid="reports-empty">
           {status === 'open' ? 'No open reports.' : 'No dismissed reports.'}
         </Typography>
@@ -187,22 +197,31 @@ function UsersTab({ confirm, me }) {
   const [q, setQ] = useState('');
   const [bannedOnly, setBannedOnly] = useState(false);
   const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const requestId = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++requestId.current;
+    setLoading(true);
     setError('');
     try {
-      setUsers(await fetchAdminUsers(q.trim(), bannedOnly));
+      const rows = await fetchAdminUsers(q.trim(), bannedOnly);
+      if (request === requestId.current) setUsers(rows);
     } catch (err) {
-      setError(err.message || 'Could not load users.');
+      if (request === requestId.current) setError(err.message || 'Could not load users.');
+    } finally {
+      if (request === requestId.current) setLoading(false);
     }
   }, [q, bannedOnly]);
 
   // Typing waits a moment, so a search is not sent for every key.
   useEffect(() => {
+    const request = ++requestId.current;
+    setLoading(true);
     const timer = setTimeout(load, 250);
-    return () => clearTimeout(timer);
+    return () => { requestId.current = request + 2; clearTimeout(timer); };
   }, [load]);
 
   const toggle = async (user) => {
@@ -232,19 +251,21 @@ function UsersTab({ confirm, me }) {
       <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 2 }}>
         <TextField
           size="small"
+          label="Search users"
+          disabled={busy}
           placeholder="Search by username or name"
           value={q}
-          onChange={e => setQ(e.target.value)}
+          onChange={e => { requestId.current++; setQ(e.target.value); }}
           slotProps={{ htmlInput: { 'data-testid': 'admin-user-search' } }}
           sx={{ flex: '1 1 220px' }}
         />
         <FormControlLabel
-          control={<Checkbox checked={bannedOnly} onChange={e => setBannedOnly(e.target.checked)} data-testid="admin-banned-only" />}
+          control={<Checkbox disabled={busy} checked={bannedOnly} onChange={e => { requestId.current++; setBannedOnly(e.target.checked); }} data-testid="admin-banned-only" />}
           label="Banned only"
         />
       </Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {users.length === 0 ? (
+      {error && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" onClick={load} disabled={loading || busy}>Retry</Button>}>{error}</Alert>}
+      {loading ? <Typography role="status" color="text.secondary">Loading users...</Typography> : !error && users.length === 0 ? (
         <Typography color="text.secondary">No users found.</Typography>
       ) : (
         <Stack spacing={1}>
@@ -289,7 +310,7 @@ export default function AdminPage() {
   if (!authReady) return null;
   if (currentUser?.role !== 'admin') {
     return (
-      <Box sx={{ maxWidth: 600, mx: 'auto', px: 2 }}>
+      <Box sx={{ maxWidth: 600, mx: 'auto' }}>
         <Alert
           severity="warning"
           data-testid="admin-forbidden"
@@ -312,7 +333,7 @@ export default function AdminPage() {
       {/* An explicit color: index.css gives h1/h2 a near-white color in dark mode. */}
       <Typography variant="h5" component="h1" gutterBottom sx={{ color: 'text.primary' }}>Admin</Typography>
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
+        <Tabs aria-label="Admin sections" value={tab} onChange={(_, v) => setTab(v)}>
           <Tab label="Reports" value="reports" data-testid="admin-tab-reports" />
           <Tab label="Users" value="users" data-testid="admin-tab-users" />
         </Tabs>

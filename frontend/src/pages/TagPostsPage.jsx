@@ -7,8 +7,8 @@ export default function TagPostsPage() {
   const { tagName } = useParams();
 
   return (
-    <Box sx={{ padding: 2 }}>
-      <Typography variant="h5" gutterBottom>
+    <Box>
+      <Typography variant="h5" component="h1" gutterBottom>
         Posts tagged with #{tagName}
       </Typography>
       <Feed tag={tagName} />

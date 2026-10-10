@@ -19,27 +19,26 @@ import { UserProvider } from './context/UserContext';
 export default function App() {
   return (
     <UserProvider>
-      <main className="App-main">
-        <TopBar />
-        <Box sx={{ paddingTop: 2 }}>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/users" element={<UserPage />} />
-            <Route path="/user-posts/:username" element={<UserPostsPage />} />
-            <Route path="/profile/:username" element={<UserProfilePage />} />
-            <Route path="/tag/:tagName" element={<TagPostsPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password" element={<ResetPasswordPage />} />
-            <Route path="/new-post" element={<NewPostPage />} />
-            <Route path="/edit-profile" element={<EditProfilePage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="/admin" element={<AdminPage />} />
-            <Route path="*" element={<HomePage />} />
-          </Routes>
-        </Box>
-      </main>
+      <a href="#main-content" className="skip-link">Skip to content</a>
+      <TopBar />
+      <Box component="main" id="main-content" tabIndex={-1} className="App-main" sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 2, sm: 3 }, pt: 3, pb: 5 }}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/users" element={<UserPage />} />
+          <Route path="/user-posts/:username" element={<UserPostsPage />} />
+          <Route path="/profile/:username" element={<UserProfilePage />} />
+          <Route path="/tag/:tagName" element={<TagPostsPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/new-post" element={<NewPostPage />} />
+          <Route path="/edit-profile" element={<EditProfilePage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="*" element={<HomePage />} />
+        </Routes>
+      </Box>
     </UserProvider>
   );
 }

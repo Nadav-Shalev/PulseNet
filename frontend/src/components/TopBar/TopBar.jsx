@@ -15,10 +15,16 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { UserContext } from '../../context/UserContext';
 import { logoutUser } from '../../api/api';
+
+const navSx = {
+  color: 'inherit', minWidth: 0, px: 1.25,
+  '&.active': { bgcolor: 'rgba(255,255,255,0.16)' },
+  '&:focus-visible': { outlineColor: 'white' },
+};
 
 const pages = [
   { label: 'Home', to: '/' },
@@ -29,6 +35,7 @@ const pages = [
 export default function TopBar() {
   const [anchorElNav, setAnchorElNav] = useState(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const { currentUser, logout } = useContext(UserContext);
   // Only decides whether the link shows: the admin page and API check the role again.
   const isAdmin = currentUser?.role === 'admin';
@@ -38,18 +45,21 @@ export default function TopBar() {
   const handleCloseNavMenu = () => setAnchorElNav(null);
 
   const handleLogout = async (allDevices = false) => {
+    if (logoutBusy) return;
+    setLogoutBusy(true);
     // Tell the backend to drop the session row(s) + clear the cookie first;
     // even if the request fails, drop the local state so the UI reflects logout.
     setLogoutOpen(false);
     try { await logoutUser(allDevices); } catch { /* ignore */ }
+    setLogoutBusy(false);
     logout();
     navigate('/');
   };
 
   return (
-    <AppBar position="static">
-      <Container maxWidth="xl">
-        <Toolbar disableGutters>
+    <AppBar position="static" component="header">
+      <Container maxWidth={false} sx={{ maxWidth: 1200, px: { xs: 2, sm: 3 } }}>
+        <Toolbar component="nav" aria-label="Main navigation" disableGutters>
           {/* Left side: App name + Profile + New Post button */}
           <Typography
             variant="h6"
@@ -58,10 +68,11 @@ export default function TopBar() {
             to="/"
             sx={{
               mr: 2,
-              display: { xs: 'none', md: 'flex' },
+              display: 'flex',
+              flexGrow: { xs: 1, md: 0 },
               fontFamily: 'monospace',
               fontWeight: 700,
-              letterSpacing: '.1rem',
+              letterSpacing: '.04rem',
               color: 'inherit',
               textDecoration: 'none',
             }}
@@ -72,7 +83,7 @@ export default function TopBar() {
           {currentUser && (
             <Button
               data-testid="nav-profile"
-              component={Link}
+              component={NavLink}
               to={`/profile/${currentUser.username}`}
               startIcon={
                 <Avatar
@@ -84,7 +95,8 @@ export default function TopBar() {
                 </Avatar>
               }
               sx={{
-                mr: 2,
+                ...navSx,
+                mr: 1,
                 display: { xs: 'none', md: 'flex' },
                 color: 'white',
               }}
@@ -100,9 +112,9 @@ export default function TopBar() {
               sx={{
                 mr: 2,
                 display: { xs: 'none', md: 'flex' },
-                color: 'white',
-                backgroundColor: 'orange',
-                '&:hover': { backgroundColor: '#e65c00' },
+                backgroundColor: 'secondary.main',
+                color: 'secondary.contrastText',
+                '&:hover': { backgroundColor: 'secondary.dark' },
               }}
             >
               + New Post
@@ -110,11 +122,14 @@ export default function TopBar() {
           )}
 
           {/* Mobile menu */}
-          <Box sx={{ flexGrow: 1, display: { xs: 'flex', md: 'none' } }}>
-            <IconButton size="large" onClick={handleOpenNavMenu} color="inherit">
+          <Box sx={{ display: { xs: 'flex', md: 'none' } }}>
+            <IconButton size="large" onClick={handleOpenNavMenu} color="inherit"
+              aria-label="Open navigation menu" aria-controls={anchorElNav ? 'mobile-navigation' : undefined}
+              aria-expanded={Boolean(anchorElNav)} aria-haspopup="true">
               <MenuIcon />
             </IconButton>
             <Menu
+              id="mobile-navigation"
               anchorEl={anchorElNav}
               anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
               keepMounted
@@ -124,7 +139,7 @@ export default function TopBar() {
               sx={{ display: { xs: 'block', md: 'none' } }}
             >
               {pages.map(page => (
-                <MenuItem key={page.label} component={Link} to={page.to} onClick={handleCloseNavMenu}>
+                <MenuItem key={page.label} component={NavLink} end to={page.to} onClick={handleCloseNavMenu}>
                   <Typography sx={{ textAlign: 'center' }}>{page.label}</Typography>
                 </MenuItem>
               ))}
@@ -151,7 +166,7 @@ export default function TopBar() {
                 </MenuItem>
               )}
               {currentUser ? (
-                <MenuItem onClick={() => { handleCloseNavMenu(); setLogoutOpen(true); }}>
+                <MenuItem disabled={logoutBusy} onClick={() => { handleCloseNavMenu(); setLogoutOpen(true); }}>
                   <Typography sx={{ textAlign: 'center' }}>Logout</Typography>
                 </MenuItem>
               ) : (
@@ -167,9 +182,10 @@ export default function TopBar() {
             {pages.map(page => (
               <Button
                 key={page.label}
-                component={Link}
+                component={NavLink}
+                end
                 to={page.to}
-                sx={{ my: 2, color: 'white', display: 'block' }}
+                sx={{ ...navSx, my: 1 }}
               >
                 {page.label}
               </Button>
@@ -177,21 +193,21 @@ export default function TopBar() {
 
             {isAdmin && (
               <Button
-                component={Link}
+                component={NavLink}
                 to="/admin"
                 data-testid="nav-admin"
-                sx={{ my: 2, color: 'white', display: 'block' }}
+                sx={{ ...navSx, my: 1 }}
               >
                 Admin
               </Button>
             )}
 
             {currentUser ? (
-              <Button data-testid="nav-logout" sx={{ my: 2, color: 'orange' }} onClick={() => setLogoutOpen(true)}>
+              <Button data-testid="nav-logout" disabled={logoutBusy} sx={{ ...navSx, my: 1 }} onClick={() => setLogoutOpen(true)}>
                 Logout
               </Button>
             ) : (
-              <Button component={Link} to="/login" sx={{ my: 2, color: 'white', display: 'block' }}>
+              <Button component={Link} to="/login" sx={{ ...navSx, my: 1 }}>
                 Login
               </Button>
             )}

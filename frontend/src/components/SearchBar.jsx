@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
+import Alert from '@mui/material/Alert';
+import Button from '@mui/material/Button';
+import Typography from '@mui/material/Typography';
 import SearchIcon from '@mui/icons-material/Search';
 import InputBase from '@mui/material/InputBase';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
-import { styled, alpha } from '@mui/material/styles';
+import { styled } from '@mui/material/styles';
 import Users from './Users';
 import { fetchUsers } from '../api/api';
 
@@ -12,8 +15,8 @@ const PAGE_SIZE = 10;
 const Search = styled('div')(({ theme }) => ({
   position: 'relative',
   borderRadius: theme.shape.borderRadius,
-  backgroundColor: alpha(theme.palette.common.black, 0.07),
-  '&:hover': { backgroundColor: alpha(theme.palette.common.black, 0.1) },
+  backgroundColor: theme.palette.action.hover,
+  '&:hover': { backgroundColor: theme.palette.action.selected },
   width: '100%',
   maxWidth: 400,
   margin: '0 auto',
@@ -49,38 +52,54 @@ export default function SearchBar() {
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef(null);
+  const generation = useRef(0);
+  const inFlight = useRef(true);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
 
   // Debounced: when the search query changes, reset and fetch the first 10 from
   // the server (matches username/name). Brief item 7 — "fetch first 10
   // users accordingly to the search field".
   useEffect(() => {
-    let cancelled = false;
+    const request = ++generation.current;
+    inFlight.current = true;
     setLoading(true);
+    setError('');
+    setUsers([]);
+    setOffset(0);
+    setHasMore(true);
     const handle = setTimeout(() => {
       fetchUsers(searchTerm.trim(), PAGE_SIZE, 0)
         .then(rows => {
-          if (cancelled) return;
+          if (request !== generation.current) return;
           const list = mapUsers(rows);
           setUsers(list);
           setOffset(list.length);
           setHasMore(list.length === PAGE_SIZE);
         })
-        .finally(() => { if (!cancelled) setLoading(false); });
+        .catch(err => { if (request === generation.current) setError(err.message || 'Could not load users.'); })
+        .finally(() => { if (request === generation.current) { inFlight.current = false; setLoading(false); } });
     }, 250);
-    return () => { cancelled = true; clearTimeout(handle); };
-  }, [searchTerm]);
+    return () => { generation.current = request + 1; clearTimeout(handle); };
+  }, [searchTerm, retry]);
 
   // Fetch and append the next 10 users (brief item 8).
   const handleLoadMore = () => {
+    if (inFlight.current) return;
+    const request = generation.current;
+    inFlight.current = true;
     setLoading(true);
+    setError('');
     fetchUsers(searchTerm.trim(), PAGE_SIZE, offset)
       .then(rows => {
+        if (request !== generation.current) return;
         const list = mapUsers(rows);
         setUsers(prev => [...prev, ...list]);
         setOffset(prev => prev + list.length);
         setHasMore(list.length === PAGE_SIZE);
       })
-      .finally(() => setLoading(false));
+      .catch(err => { if (request === generation.current) setError(err.message || 'Could not load more users.'); })
+      .finally(() => { if (request === generation.current) { inFlight.current = false; setLoading(false); } });
   };
 
   // Keep a ref to the latest loader so the observer never closes over a stale `offset`.
@@ -90,26 +109,27 @@ export default function SearchBar() {
   // Infinite scroll: when the sentinel scrolls into view, load the next 10 users.
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el || loading || !hasMore) return;
+    if (!el || loading || error || !hasMore) return;
     const observer = new IntersectionObserver(
       ([entry]) => { if (entry.isIntersecting) loadMoreRef.current(); },
       { rootMargin: '300px' }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [loading, hasMore]);
+  }, [loading, hasMore, error]);
 
   return (
-    <Box sx={{ padding: 2 }}>
+    <Box>
+      <Typography variant="h5" component="h1" gutterBottom>Discover people</Typography>
       <Search>
         <SearchIconWrapper>
           <SearchIcon />
         </SearchIconWrapper>
         <StyledInputBase
           placeholder="Search by username..."
-          inputProps={{ 'aria-label': 'search' }}
+          slotProps={{ input: { 'aria-label': 'Search users by username or name' } }}
           value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
+          onChange={e => { generation.current++; inFlight.current = true; setSearchTerm(e.target.value); }}
         />
       </Search>
 
@@ -117,12 +137,18 @@ export default function SearchBar() {
 
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-          <CircularProgress />
+          <CircularProgress aria-label="Loading users" />
         </Box>
       )}
 
+      {!loading && !error && users.length === 0 && (
+        <Typography color="text.secondary" role="status" sx={{ py: 3 }}>No users found. Try another name.</Typography>
+      )}
+      {error && <Alert severity="error" sx={{ mt: 2 }} action={
+        <Button color="inherit" disabled={loading} onClick={() => users.length ? handleLoadMore() : setRetry(n => n + 1)}>Retry</Button>
+      }>{error}</Alert>}
       {/* Sentinel — when it enters the viewport, the next 10 users auto-load */}
-      {hasMore && <div ref={sentinelRef} style={{ height: 20 }} />}
+      {hasMore && !error && <div ref={sentinelRef} style={{ height: 20 }} />}
     </Box>
   );
 }

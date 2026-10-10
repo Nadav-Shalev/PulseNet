@@ -20,6 +20,7 @@ export default function ForgotPasswordPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (submitting) return;
     setError('');
     setSent('');
     if (!email.trim()) {
@@ -38,7 +39,7 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 0, sm: 3 } }}>
       <Card sx={{ maxWidth: 420, width: '100%' }}>
         <CardContent
           component="form"
@@ -46,7 +47,7 @@ export default function ForgotPasswordPage() {
           onSubmit={handleSubmit}
           sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}
         >
-          <Typography variant="h5" fontWeight={700}>Forgot your password?</Typography>
+          <Typography variant="h5" component="h1" fontWeight={700}>Forgot your password?</Typography>
           <Typography variant="body2" color="text.secondary">
             Enter the email of your account and we will send you a link to choose a new password.
           </Typography>
@@ -61,6 +62,9 @@ export default function ForgotPasswordPage() {
           <TextField
             label="Email"
             type="email"
+            autoComplete="email"
+            required
+            disabled={submitting}
             placeholder="you@example.com"
             value={email}
             onChange={e => setEmail(e.target.value)}

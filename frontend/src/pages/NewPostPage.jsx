@@ -45,7 +45,26 @@ export default function NewPostPage() {
   const { currentUser, authReady } = useContext(UserContext);
   const navigate = useNavigate();
   const debounceRef = useRef(null);
+  const tagRequest = useRef(0);
+  const [tagError, setTagError] = useState('');
+  const [tagLoading, setTagLoading] = useState(false);
   const ai = useAiAssist();
+  const editorRef = useRef(null);
+
+  // Quill creates these DOM controls outside React; name them once it mounts.
+  useEffect(() => {
+    const editor = editorRef.current?.getEditor();
+    if (!editor) return;
+    editor.root.setAttribute('role', 'textbox');
+    editor.root.setAttribute('aria-label', 'Post body');
+    editor.root.setAttribute('aria-multiline', 'true');
+    const toolbar = editor.getModule('toolbar').container;
+    const labels = { bold: 'Bold', italic: 'Italic', underline: 'Underline', link: 'Insert link', clean: 'Clear formatting' };
+    toolbar.querySelectorAll('button').forEach(button => {
+      const format = [...button.classList].find(name => name.startsWith('ql-'))?.slice(3);
+      button.setAttribute('aria-label', format === 'list' ? (button.value === 'ordered' ? 'Numbered list' : 'Bullet list') : labels[format] || format);
+    });
+  }, []);
 
   useEffect(() => {
     if (authReady && !currentUser) navigate('/login');
@@ -60,20 +79,27 @@ export default function NewPostPage() {
   // Debounced tag search — case-insensitive on the backend.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    const request = ++tagRequest.current;
+    setTagError('');
     const q = tagInput.trim();
     if (!q) {
       setTagOptions([]);
+      setTagLoading(false);
       return;
     }
+    setTagOptions([]);
+    setTagLoading(true);
     debounceRef.current = setTimeout(async () => {
       try {
         const rows = await searchTags(q);
-        setTagOptions(rows.map(r => r.name));
+        if (request === tagRequest.current) setTagOptions(rows.map(r => r.name));
       } catch {
-        setTagOptions([]);
+        if (request === tagRequest.current) setTagError('Tag suggestions are unavailable. You can still type a tag and press Enter.');
+      } finally {
+        if (request === tagRequest.current) setTagLoading(false);
       }
     }, 250);
-    return () => debounceRef.current && clearTimeout(debounceRef.current);
+    return () => { tagRequest.current = request + 1; clearTimeout(debounceRef.current); };
   }, [tagInput]);
 
   const handleFileSelect = async (e) => {
@@ -93,6 +119,7 @@ export default function NewPostPage() {
   };
 
   const handlePublish = async () => {
+    if (loading || uploading || ai.busy || success || !authReady || !currentUser) return;
     if (!title.trim() || isEmptyHtml(body)) {
       setError('Title and body are required.');
       return;
@@ -110,10 +137,10 @@ export default function NewPostPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 0, sm: 3 } }}>
       <Card sx={{ width: '100%', maxWidth: 600 }}>
         <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
-          <Typography variant="h5" fontWeight={700}>Create New Post</Typography>
+          <Typography variant="h5" component="h1" fontWeight={700}>Create New Post</Typography>
 
           {success && (
             <Alert severity="success">
@@ -131,7 +158,7 @@ export default function NewPostPage() {
             placeholder="Enter post title..."
             value={title}
             onChange={e => setTitle(e.target.value)}
-            disabled={success}
+            disabled={success || loading || uploading || ai.busy}
             fullWidth
             slotProps={{ htmlInput: { 'data-testid': 'post-title-input' } }}
           />
@@ -143,11 +170,12 @@ export default function NewPostPage() {
             {/* WYSIWYG editor — bold, italic, link, lists. Output is HTML. */}
             <Box sx={{ '& .ql-container': { minHeight: 180, fontSize: '1rem' } }}>
               <ReactQuill
+                ref={editorRef}
                 theme="snow"
                 value={body}
                 onChange={setBody}
                 modules={QUILL_MODULES}
-                readOnly={success}
+                readOnly={success || loading || ai.busy}
                 placeholder="Write your post content here..."
               />
             </Box>
@@ -158,7 +186,7 @@ export default function NewPostPage() {
                 variant="outlined"
                 startIcon={<SpellcheckIcon />}
                 onClick={() => ai.run(() => aiCorrect(body, 'html'), { html: true, onApply: setBody })}
-                disabled={success || ai.busy || isEmptyHtml(body)}
+                disabled={success || loading || uploading || ai.busy || isEmptyHtml(body)}
                 data-testid="ai-correct-post"
               >
                 Fix grammar
@@ -168,23 +196,25 @@ export default function NewPostPage() {
                 variant="outlined"
                 startIcon={<AutoAwesomeIcon />}
                 onClick={() => ai.run(() => aiSuggestPost(title.trim(), tags), { html: true, onApply: setBody })}
-                disabled={success || ai.busy || !title.trim()}
+                disabled={success || loading || uploading || ai.busy || !title.trim()}
                 data-testid="ai-suggest-post"
               >
                 Draft from title
               </Button>
             </Box>
-            <AiSuggestion assist={ai} />
+            <AiSuggestion assist={ai} disabled={loading || uploading || success} />
           </Box>
 
           <Autocomplete
             multiple
             freeSolo
-            disabled={success}
+            disabled={success || loading || uploading || ai.busy}
             options={tagOptions}
+            loading={tagLoading}
             value={tags}
             inputValue={tagInput}
             onInputChange={(_, value, reason) => {
+              tagRequest.current++;
               if (reason !== 'reset') setTagInput(value);
               else setTagInput('');
             }}
@@ -213,16 +243,19 @@ export default function NewPostPage() {
             )}
           />
 
+          {tagError && <Alert severity="warning">{tagError}</Alert>}
+
           {/* Cover image: upload a file (local storage) or paste a URL. */}
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
             <Button
               variant="outlined"
               component="label"
-              disabled={success || uploading}
+              tabIndex={-1}
+              disabled={success || loading || uploading || ai.busy}
               startIcon={uploading ? <CircularProgress size={16} /> : null}
             >
               {uploading ? 'Uploading...' : 'Upload Image'}
-              <input type="file" accept="image/*" hidden onChange={handleFileSelect} />
+              <input type="file" aria-label="Upload cover image" accept="image/*" disabled={success || loading || uploading || ai.busy} style={{ position: 'absolute', width: 1, height: 1, clipPath: 'inset(50%)' }} onChange={handleFileSelect} />
             </Button>
             {imageUrl && (
               <Box
@@ -238,14 +271,14 @@ export default function NewPostPage() {
             placeholder="https://example.com/image.jpg — or use Upload Image above"
             value={imageUrl}
             onChange={e => setImageUrl(e.target.value)}
-            disabled={success}
+            disabled={success || loading || uploading || ai.busy}
             fullWidth
           />
 
           <Button
             variant="contained"
             onClick={handlePublish}
-            disabled={loading || success}
+            disabled={loading || uploading || ai.busy || success || !authReady || !currentUser}
             data-testid="post-publish"
             startIcon={loading ? <CircularProgress size={18} color="inherit" /> : null}
           >

@@ -21,7 +21,10 @@ export default function SignupPage() {
   const { login } = useContext(UserContext);
   const navigate = useNavigate();
 
-  const handleSignup = async () => {
+  const handleSignup = async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    setError('');
     if (!email || !password) {
       setError('Email and password are required.');
       return;
@@ -47,10 +50,10 @@ export default function SignupPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 0, sm: 3 } }}>
       <Card sx={{ maxWidth: 420, width: '100%' }}>
-        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
-          <Typography variant="h5" fontWeight={700}>Create Account</Typography>
+        <CardContent component="form" noValidate onSubmit={handleSignup} sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
+          <Typography variant="h5" component="h1" fontWeight={700}>Create Account</Typography>
           <Typography variant="body2" color="text.secondary">
             Sign up for a new account
           </Typography>
@@ -63,12 +66,14 @@ export default function SignupPage() {
 
           <TextField
             label="Name"
+            autoComplete="name"
             placeholder="Your display name"
             value={name}
             onChange={e => setName(e.target.value)}
             helperText="Optional — defaults to the part before @ in your email."
             slotProps={{ htmlInput: { 'data-testid': 'signup-name' } }}
             fullWidth
+            disabled={submitting}
           />
           <TextField
             label="Bio"
@@ -79,34 +84,45 @@ export default function SignupPage() {
             multiline
             rows={2}
             fullWidth
+            disabled={submitting}
           />
           <TextField
             label="Email"
+            type="email"
+            autoComplete="username"
+            required
             placeholder="you@example.com"
             value={email}
             onChange={e => setEmail(e.target.value)}
             slotProps={{ htmlInput: { 'data-testid': 'signup-email' } }}
             fullWidth
+            disabled={submitting}
           />
           <TextField
             label="Password"
             type="password"
+            autoComplete="new-password"
+            required
             placeholder="••••••••"
             value={password}
             onChange={e => setPassword(e.target.value)}
             slotProps={{ htmlInput: { 'data-testid': 'signup-password' } }}
             fullWidth
+            disabled={submitting}
           />
           <TextField
             label="Repeat Password"
             type="password"
+            autoComplete="new-password"
+            required
             placeholder="••••••••"
             value={repeat}
             onChange={e => setRepeat(e.target.value)}
             slotProps={{ htmlInput: { 'data-testid': 'signup-repeat-password' } }}
             fullWidth
+            disabled={submitting}
           />
-          <Button data-testid="signup-submit" variant="contained" fullWidth onClick={handleSignup} disabled={submitting}>
+          <Button data-testid="signup-submit" variant="contained" fullWidth type="submit" disabled={submitting}>
             {submitting ? 'Signing up...' : 'Sign Up'}
           </Button>
           <Typography variant="body2" align="center">

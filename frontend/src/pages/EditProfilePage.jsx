@@ -55,11 +55,13 @@ export default function EditProfilePage() {
   };
 
   const handleSave = async () => {
+    if (saving || uploading || !authReady || !currentUser) return;
     if (!name.trim()) {
       setError('Name cannot be empty.');
       return;
     }
     setError('');
+    setSuccess(false);
     setSaving(true);
     try {
       const updated = await updateMe({
@@ -77,10 +79,10 @@ export default function EditProfilePage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 0, sm: 3 } }}>
       <Card sx={{ width: '100%', maxWidth: 520 }}>
         <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
-          <Typography variant="h5" fontWeight={700}>Edit Profile</Typography>
+          <Typography variant="h5" component="h1" fontWeight={700}>Edit Profile</Typography>
 
           {success && (
             <Alert
@@ -109,11 +111,12 @@ export default function EditProfilePage() {
             <Button
               variant="outlined"
               component="label"
-              disabled={uploading}
+              tabIndex={-1}
+              disabled={uploading || saving}
               startIcon={uploading ? <CircularProgress size={16} /> : null}
             >
               {uploading ? 'Uploading...' : 'Upload Picture'}
-              <input type="file" accept="image/*" hidden onChange={handleFileSelect} />
+              <input type="file" aria-label="Upload profile picture" accept="image/*" disabled={uploading || saving} style={{ position: 'absolute', width: 1, height: 1, clipPath: 'inset(50%)' }} onChange={handleFileSelect} />
             </Button>
           </Box>
 
@@ -122,6 +125,7 @@ export default function EditProfilePage() {
             value={name}
             onChange={e => setName(e.target.value)}
             fullWidth
+            disabled={saving || uploading}
           />
           <TextField
             label="Bio"
@@ -130,6 +134,7 @@ export default function EditProfilePage() {
             multiline
             rows={3}
             fullWidth
+            disabled={saving || uploading}
           />
           <TextField
             label="Profile Picture URL"
@@ -137,9 +142,10 @@ export default function EditProfilePage() {
             value={profileImage}
             onChange={e => setProfileImage(e.target.value)}
             fullWidth
+            disabled={saving || uploading}
           />
 
-          <Button variant="contained" onClick={handleSave} disabled={saving}>
+          <Button variant="contained" onClick={handleSave} disabled={saving || uploading || !authReady || !currentUser}>
             {saving ? 'Saving...' : 'Save Changes'}
           </Button>
         </CardContent>

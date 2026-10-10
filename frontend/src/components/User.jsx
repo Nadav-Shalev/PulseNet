@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import Avatar from '@mui/material/Avatar';
@@ -8,14 +8,15 @@ import Typography from '@mui/material/Typography';
 
 export default function User({ user }) {
   const navigate = useNavigate();
-  const goToProfile = () => navigate('/profile/' + encodeURIComponent(user.username));
 
   return (
     <TableRow>
       <TableCell>
         <Box
-          onClick={goToProfile}
+          component={Link}
+          to={'/profile/' + encodeURIComponent(user.username)}
           sx={{
+            color: 'inherit', textDecoration: 'none',
             display: 'flex',
             alignItems: 'center',
             gap: 1,

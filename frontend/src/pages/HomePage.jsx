@@ -1,5 +1,6 @@
 import { useState, useContext } from 'react';
 import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Feed from '../features/feed/Feed';
@@ -24,14 +25,15 @@ function HomePage() {
         gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 1fr) 300px' },
         gridTemplateAreas: { xs: '"tabs" "side" "feed"', lg: '"tabs side" "feed side"' },
         gridTemplateRows: { lg: 'auto 1fr' },
-        columnGap: 2,
+        columnGap: 3,
         alignItems: 'start',
       }}
     >
       <Box sx={{ gridArea: 'tabs', borderBottom: 1, borderColor: 'divider', mb: 1 }}>
-        <Tabs value={activeTab} onChange={(_, v) => setTab(v)} centered>
-          <Tab label="Global" value="global" />
-          {currentUser && <Tab label="Following" value="following" />}
+        <Typography component="h1" variant="h5" sx={{ mb: 1 }}>Your feed</Typography>
+        <Tabs aria-label="Feed source" value={activeTab} onChange={(_, v) => setTab(v)}>
+          <Tab id="feed-global-tab" aria-controls="feed-panel" label="Global" value="global" />
+          {currentUser && <Tab id="feed-following-tab" aria-controls="feed-panel" label="Following" value="following" />}
         </Tabs>
       </Box>
 
@@ -39,8 +41,7 @@ function HomePage() {
         component="aside"
         sx={{
           gridArea: 'side',
-          px: { xs: 2, lg: 0 },
-          pr: { lg: 2 },
+          minWidth: 0,
           mb: { xs: 2, lg: 0 },
           position: { lg: 'sticky' },
           top: { lg: 16 },
@@ -49,7 +50,7 @@ function HomePage() {
         <HomeSidebar />
       </Box>
 
-      <Box sx={{ gridArea: 'feed', minWidth: 0 }}>
+      <Box id="feed-panel" role="tabpanel" aria-labelledby={`feed-${activeTab}-tab`} sx={{ gridArea: 'feed', minWidth: 0 }}>
         {activeTab === 'following' ? (
           <Feed
             feed="following"
