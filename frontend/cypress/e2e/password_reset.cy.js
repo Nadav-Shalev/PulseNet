@@ -5,8 +5,12 @@
 const api = (route) => `${Cypress.env('apiBaseUrl')}${route}`
 const NEW_PASSWORD = 'N3w-E2e-pass!'
 
+// The link points to the app under test (the backend's APP_BASE_URL): the Vite dev
+// server on :5173 with npm run test:e2e, nginx on :8080 with npm run test:e2e:docker.
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const linkIn = (mail) => {
-  const match = mail.text.match(/http:\/\/localhost:5173\/reset-password#token=[A-Za-z0-9_-]+/)
+  const link = new RegExp(`${escapeRegExp(Cypress.config('baseUrl'))}/reset-password#token=[A-Za-z0-9_-]+`)
+  const match = mail.text.match(link)
   expect(match, 'the reset link in the mail').to.not.equal(null)
   return match[0]
 }

@@ -18,15 +18,21 @@ export default defineConfig({
     setupNodeEvents(on) {
       on('task', {
         // Make a user an admin the only way the app allows: backend/manage.py
-        // make-admin. Only on the database scripts/e2e.mjs rebuilt for this run
+        // make-admin. Only on the database the runner rebuilt for this run
         // (E2E_DB_NAME, *_e2e), so a spec can never promote anyone anywhere else.
+        // scripts/e2e.mjs runs the backend here; scripts/e2e-docker.mjs in docker
+        // compose (E2E_COMPOSE), so manage.py runs in the backend container there
+        // (the project comes from COMPOSE_PROJECT_NAME / COMPOSE_FILE).
         //   cy.task('makeAdmin', user.username)
         makeAdmin(username) {
           const db = process.env.E2E_DB_NAME || ''
           if (!/_e2e$/.test(db)) {
             throw new Error(`makeAdmin runs only on an *_e2e database (E2E_DB_NAME=${db || 'unset'}): use npm run test:e2e`)
           }
-          const result = spawnSync(PYTHON, [path.join(BACKEND_DIR, 'manage.py'), 'make-admin', username], {
+          const [command, args] = process.env.E2E_COMPOSE
+            ? ['docker', ['compose', 'exec', '-T', '-e', `DB_NAME=${db}`, 'backend', 'python', 'manage.py', 'make-admin', username]]
+            : [PYTHON, [path.join(BACKEND_DIR, 'manage.py'), 'make-admin', username]]
+          const result = spawnSync(command, args, {
             env: { ...process.env, DB_NAME: db },
             encoding: 'utf8',
           })

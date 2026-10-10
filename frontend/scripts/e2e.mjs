@@ -11,18 +11,11 @@
 // Env overrides: PYTHON (interpreter, default python / python3), E2E_BACKEND_HOST (default ::1).
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
-import net from 'node:net';
+import { closeSync, mkdirSync, openSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { FRONTEND_DIR, LOG_DIR, OUTBOX_DIR, PYTHON, log, portInUse, runCypress, tail } from './e2e-lib.mjs';
 
-const FRONTEND_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BACKEND_DIR = path.resolve(FRONTEND_DIR, '..', 'backend');
-const LOG_DIR = path.join(FRONTEND_DIR, 'cypress', 'logs');
-// Mail from this run (MAIL_PROVIDER=file): emptied first, so a spec only ever reads its own.
-const OUTBOX_DIR = path.join(FRONTEND_DIR, 'cypress', 'outbox');
-
-const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const E2E_DB = 'pulsenet_e2e';
 // Same IPv6 loopback the dev server binds in app.py: on Windows the browser's
 // `localhost` resolves to ::1 first (see the note at the bottom of app.py).
@@ -33,28 +26,6 @@ const API_BASE_URL = `http://localhost:${BACKEND_PORT}/api`; // what the app and
 const READY_TIMEOUT_MS = 60_000;
 
 const servers = [];
-
-function log(message) {
-  console.log(`e2e: ${message}`);
-}
-
-// Is anything listening on `port` (IPv6 or IPv4 loopback)? A dev server left running
-// would otherwise serve Cypress from the dev database.
-function portInUse(port) {
-  const probe = (host) => new Promise((resolve) => {
-    const socket = net.connect({ host, port });
-    socket.setTimeout(1000);
-    socket.once('connect', () => { socket.destroy(); resolve(true); });
-    socket.once('timeout', () => { socket.destroy(); resolve(false); });
-    socket.once('error', () => resolve(false));
-  });
-  return Promise.all([probe('::1'), probe('127.0.0.1')]).then((hits) => hits.some(Boolean));
-}
-
-function tail(file, lines = 20) {
-  if (!existsSync(file)) return '';
-  return readFileSync(file, 'utf8').trimEnd().split(/\r?\n/).slice(-lines).join('\n');
-}
 
 // Start a long-running server with its output in cypress/logs/<name>.log.
 function startServer(name, command, args, options) {
@@ -94,15 +65,8 @@ async function waitUntilReady(server, url, isReady) {
   throw new Error(`${server.name} not ready after ${READY_TIMEOUT_MS / 1000}s at ${url}:\n${tail(server.logFile)}`);
 }
 
-function runNode(args) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, args, { cwd: FRONTEND_DIR, stdio: 'inherit' });
-    child.once('exit', (code) => resolve(code ?? 1));
-    child.once('error', () => resolve(1));
-  });
-}
-
 async function main() {
+  // A dev server left running would serve Cypress from the dev database.
   for (const port of [BACKEND_PORT, VITE_PORT]) {
     if (await portInUse(port)) {
       throw new Error(`port ${port} is already in use. Stop the dev server first: the E2E run starts its own, on ${E2E_DB}.`);
@@ -117,6 +81,7 @@ async function main() {
   if (migrate.status !== 0) throw new Error(`migrate.py failed (exit ${migrate.status})`);
 
   mkdirSync(LOG_DIR, { recursive: true });
+  // Emptied first, so a spec only ever reads the mail of this run.
   rmSync(OUTBOX_DIR, { recursive: true, force: true });
   mkdirSync(OUTBOX_DIR, { recursive: true });
   log(`starting backend on [${BACKEND_HOST}]:${BACKEND_PORT} and Vite on :${VITE_PORT} (logs: cypress/logs/)`);
@@ -163,7 +128,7 @@ async function main() {
   process.env.E2E_DB_NAME = E2E_DB;
   // ...and its lastMail task reads the mails the backend wrote here.
   process.env.E2E_MAIL_OUTBOX = OUTBOX_DIR;
-  return runNode([path.join(FRONTEND_DIR, 'scripts', 'run-cypress.mjs'), 'run', ...process.argv.slice(2)]);
+  return runCypress(process.argv.slice(2));
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
