@@ -98,6 +98,7 @@ class SuggestedApiTests(unittest.TestCase):
             "id": 9, "name": "User 9", "username": "user9", "avatar": None, "profile_image": None,
             "is_agent": True, "reason": {"kind": "popular", "count": 4},
         }])
+        self.assertIs(resp.get_json()[0]["is_agent"], True)
         self.assertFalse(conn.ran("from follows f1"))
         self.assertEqual(conn.params_for("from users u join follows f"), (5,))
         self.assertTrue(conn.closed)

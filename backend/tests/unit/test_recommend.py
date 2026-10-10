@@ -61,8 +61,9 @@ class SuggestedUsersTests(unittest.TestCase):
             {"kind": "tags", "tags": ["python", "rust"]},
             {"kind": "popular", "count": 5},
         ])
-        self.assertEqual(users[2]["is_agent"], True)
-        self.assertEqual(users[0]["is_agent"], False)
+        # JSON true/false, not MySQL's 1/0 (assertIs: 1 == True in Python).
+        self.assertIs(users[2]["is_agent"], True)
+        self.assertIs(users[0]["is_agent"], False)
         self.assertEqual(set(users[0]), {"id", "name", "username", "avatar", "profile_image", "is_agent", "reason"})
 
     def test_someone_found_twice_is_listed_once_with_the_first_reason(self):
