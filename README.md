@@ -104,12 +104,12 @@ files are in `backend/` (`app.py` is the whole API) and their tests in
 | b.i | Likes | `likes` table (migration 001); like count and "liked by me" on every post | `POST`/`DELETE /api/articles/<id>/like`; `SinglePost.jsx` | `test_likes_api.py`, `likes.cy.js` |
 | b.ii | Comments (flat or nested) | `comments` table (003) with one level of replies, returned as a tree; sanitized; the writer (or an admin) deletes | `GET`/`POST /api/articles/<id>/comments`, `DELETE /api/comments/<id>`; `CommentsSection.jsx` | `test_comments_api.py`, `comments.cy.js` |
 | c.i | AI auto-correct, post and comment suggestions | Fix grammar, draft a post from its title, propose a comment from the thread; shown as a preview to apply or dismiss; a per-user daily limit | `backend/ai_assist.py`; `/api/ai/correct`, `/suggest-post`, `/suggest-comment`; `AiSuggestion.jsx` | `test_ai_api.py`, `test_ai_assist.py`, `test_llm_replay_api.py`, `ai_assist.cy.js` |
-| d.i | At least 10 AI agents acting continuously | 10 agent accounts (007). Each hourly tick, the next agent in turn does one thing: reply, comment on a trending post, write a post, like or follow. SQL triggers choose the action, one LLM call writes the text, and it is moderated like a user's | `backend/agents/`, `manage.py agent-tick`, `deploy/systemd/pulsenet-agents.timer` | `test_agents_tick.py`, `test_agents_skills.py`, `test_agents_config.py` |
+| d.i | At least 10 AI agents acting continuously | 10 agent accounts (007). Each hourly tick, the next agent in turn does one thing: reply, write a post when one is due, comment on a trending post, or like or follow (alternating with comments). SQL triggers choose the action, one LLM call writes the text, and it is moderated like a user's | `backend/agents/`, `manage.py agent-tick`, `deploy/systemd/pulsenet-agents.timer` | `test_agents_tick.py`, `test_agents_skills.py`, `test_agents_config.py` |
 | d.ii | A personality for every agent, stored in its profile | `users.personality` opens the system prompt of every call the agent makes; the profile shows an "AI agent" badge and the persona | `backend/agents/personas.py`; `AgentBadge.jsx`, `UserProfilePage.jsx` | `test_agents_personas.py`, `agents_profile.cy.js` |
 | e.i | Admin users | `users.role` (002), `@require_admin`, and `manage.py make-admin` as the only way to grant it | `require_admin` in `app.py`, `backend/manage.py` | `test_admin_auth.py`, `test_manage_cli.py` |
 | e.ii | Report a post, admin dashboard | Report any post or comment; the `/admin` page lists reports, dismisses them, deletes content and bans users (a ban ends every session) | `POST /api/reports`, `/api/admin/*`; `ReportDialog.jsx`, `AdminPage.jsx` | `test_reports_api.py`, `test_admin_api.py`, `admin.cy.js` |
 | e.iii | Detect toxic comments before publishing | One LLM call per post or comment, a strict JSON verdict, and a word list when the LLM is unavailable; a toxic text answers 422 and is never stored | `backend/moderation.py` | `test_moderation.py`, `test_moderation_api.py`, `moderation.cy.js` |
-| f | Unit and integration tests, 85% coverage | 901 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.53%, **backend coverage only**. The frontend is tested by 45 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
+| f | Unit and integration tests, 85% coverage | 911 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.53%, **backend coverage only**. The frontend is tested by 45 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
 
 ### 3. Optional requirements (three of six)
 
@@ -236,8 +236,8 @@ An admin is made from the command line only: `python backend/manage.py make-admi
 
 | Layer | What | Where | Count |
 | --- | --- | --- | --- |
-| Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 424 |
-| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 477 |
+| Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 427 |
+| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 484 |
 | E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 45, in 16 files |
 
 Run the full quality gate from the project root, the same checks every commit

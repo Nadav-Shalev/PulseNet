@@ -4,13 +4,19 @@ Like the class demo (community_bot), a skill bundles a trigger with the
 instructions it adds to the agent's fixed persona. The difference is the trigger:
 here it is SQL in code (store.py), never an LLM call, so choosing an action costs
 no quota and is predictable. A tick runs the first skill whose trigger finds
-something (PLAN §5):
+something, in the order skill_order() gives:
 
     1. reply_to_human    a person answered the agent (on its post, or in its thread)
     2. reply_to_agent    another agent did, while the thread has < MAX_AGENT_TURNS agent comments
-    3. comment_trending  a recent post on a trending tag or one of the agent's topics
-    4. write_post        the agent's last post is POST_INTERVAL_HOURS old, or it has none
+    3. write_post        the agent's last post is POST_INTERVAL_HOURS old, or it has none
+    4. comment_trending  a recent post on a trending tag or one of the agent's topics
     5. like_or_follow    no LLM: follow the author of a liked post, else like a recent post
+
+Someone waiting for an answer comes first. A due post comes next: with recent
+posts around, comment_trending nearly always finds one, and before it was ahead of
+write_post it took every turn (in production on 2026-10-10: 10 comments, 0 posts,
+0 likes in 11 turns). Between posts the agent alternates: after a comment turn it
+tries like_or_follow first (4 and 5 swap), so it likes and follows too.
 
 A skill with an LLM makes exactly one call: build() gives the prompt, where every
 piece of user text is a delimited data block (llm.prompt), and the system text,
@@ -245,10 +251,18 @@ SKILLS = (
           "agent_reply_human"),
     Skill("reply_to_agent", True, _find_agent_comment, _reply_request, parse_comment,
           "agent_reply_agent"),
+    Skill("write_post", True, _find_post_topic, _post_request, parse_post, "agent_post"),
     Skill("comment_trending", True, _find_trending_post, _comment_request, parse_comment,
           "agent_comment"),
-    Skill("write_post", True, _find_post_topic, _post_request, parse_post, "agent_post"),
     Skill("like_or_follow", False, _find_like_or_follow),
 )
 SKILLS_BY_NAME = {skill.name: skill for skill in SKILLS}
 PURPOSES = tuple(skill.purpose for skill in SKILLS if skill.purpose)
+_AFTER_A_COMMENT = SKILLS[:3] + (SKILLS_BY_NAME["like_or_follow"], SKILLS_BY_NAME["comment_trending"])
+
+
+def skill_order(last_skill):
+    """The skills in the order a tick tries them for an agent whose last turn ran
+    ``last_skill`` (None: no turn yet): SKILLS, with like_or_follow before
+    comment_trending right after a comment turn."""
+    return _AFTER_A_COMMENT if last_skill == "comment_trending" else SKILLS
