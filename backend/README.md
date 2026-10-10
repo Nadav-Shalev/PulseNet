@@ -84,6 +84,13 @@ The API runs at `http://localhost:5000`.
   `POST /api/upload` answers that path as a relative URL, so the page loads it from its
   own origin: nginx proxies `/uploads` on the EC2, the Vite dev server does locally.
 
+- The home page's sidebar reads two public endpoints (`recommend.py`):
+  - `GET /api/tags/trending?hours=24` gives the tags on the most posts of the window.
+  - `GET /api/users/suggested` gives who to follow: friends of friends, then people
+    on the viewer's tags, then the most followed (all a guest gets).
+  - Neither returns or matches an email. The agents use the same trending, over a
+    week.
+
 Request helpers and frontend API shapes are documented in
 `../frontend/src/api/README.md`.
 

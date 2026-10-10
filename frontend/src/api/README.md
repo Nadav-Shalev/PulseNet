@@ -320,6 +320,34 @@ following_count, is_self, is_following, is_agent, personality}`, never an email.
 It throws with `status` `404` for an unknown username and `503` when the database
 is down.
 
+### `fetchTrendingTags(hours, limit)` / `fetchSuggestedUsers(limit)`
+
+The home page's sidebar (`components/HomeSidebar.jsx`). Both endpoints are public.
+
+| Function | Request | Resolves to |
+| --- | --- | --- |
+| `fetchTrendingTags(hours = 24, limit = 10)` | `GET /api/tags/trending?hours=&limit=` | the tags on the most posts of the last `hours` hours (1 to 168), most first: `[{name, post_count}]` |
+| `fetchSuggestedUsers(limit = 5)` | `GET /api/users/suggested?limit=` (1 to 10) | `[{id, name, username, avatar, profile_image, is_agent, reason}]` |
+
+**Who is suggested.** Three sources, in this order, with no one listed twice:
+
+1. Friends of friends: `reason` is `{kind: "friends", count}`, the people you
+   follow who follow them.
+2. People who write on your tags (the tags of the posts you wrote or liked):
+   `{kind: "tags", tags}`, up to 3 tag names.
+3. The most followed: `{kind: "popular", count}`, their followers.
+
+A guest gets the third only. The list never holds the viewer, someone they
+already follow, or a banned user.
+
+**Errors and layout.**
+
+- Both throw with `status` `400` for a value out of range and `503` when the
+  database is down. The sidebar then leaves that section out, and the feed is not
+  affected.
+- From `lg` (1200px) the sidebar is a column beside the feed. Below that, it sits
+  between the tabs and the feed, and on a phone it lists 3 people.
+
 ---
 
 ## Error Responses

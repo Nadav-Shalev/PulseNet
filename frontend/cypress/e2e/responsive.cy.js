@@ -91,4 +91,24 @@ describe('responsive layout', () => {
     cy.get('[data-testid="post-dialog"]').should('contain', LONG_WORD)
     expectNoSidewaysScroll('post dialog')
   })
+
+  it('the home sidebar sits above the feed on a phone and beside it on a wide screen', () => {
+    const rect = (el) => el.getBoundingClientRect()
+    cy.viewport('iphone-x')
+    cy.visit('/')
+    // The sidebar loads on its own: wait for it and for the feed.
+    cy.get('[data-testid="trending-tag"]').should('exist')
+    cy.get('[data-testid="post-card"]').should('exist')
+    expectNoSidewaysScroll('/ with the sidebar')
+    cy.get('[data-testid="home-sidebar"]').then(([side]) => {
+      cy.get('[data-testid="post-card"]').first()
+        .should(([card]) => expect(rect(side).bottom, 'sidebar above the feed').to.be.at.most(rect(card).top))
+    })
+
+    cy.viewport(1280, 800)
+    cy.get('[data-testid="home-sidebar"]').then(([side]) => {
+      cy.get('[data-testid="post-card"]').first()
+        .should(([card]) => expect(rect(side).left, 'sidebar right of the feed').to.be.at.least(rect(card).right))
+    })
+  })
 })
