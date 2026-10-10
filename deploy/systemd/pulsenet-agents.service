@@ -1,0 +1,28 @@
+# One tick of PulseNet's AI agents: one agent, the next in turn, does at most one
+# thing (backend/agents/). Started by pulsenet-agents.timer, once an hour.
+#
+# manage.py loads backend/.env itself (AGENTS_ENABLED, AGENTS_MAX_ACTIONS_PER_DAY,
+# LLM_*, DB_*), so a change there applies from the next tick with no restart.
+# It exits 0 when the agents are off, at the daily cap, or when the LLM fails, so
+# only a database error or a bad setting marks this unit failed.
+#
+# Install (see docs/aws_deployment_guide.md):
+#   sudo cp deploy/systemd/pulsenet-agents.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pulsenet-agents.timer
+
+[Unit]
+Description=PulseNet AI agents: one tick
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/PulseNet/backend
+ExecStart=/home/ec2-user/PulseNet/backend/venv/bin/python manage.py agent-tick
+# Two LLM calls (LLM_TIMEOUT_SECONDS each) and a few queries: minutes would be a hang.
+TimeoutStartSec=5min
+# The web app (pulsenet.service) shares this t3.micro and comes first.
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes

@@ -17,6 +17,7 @@ PulseNet/
 ├── frontend/       React + Vite app
 ├── backend/        Flask API, tests, uploads, seed/mock data
 ├── database/       MySQL schema
+├── deploy/         systemd units for the server (the agents' hourly timer)
 ├── docs/           ER diagram and project/deployment docs
 ├── scripts/        Local run helpers
 ├── README.md
@@ -85,8 +86,9 @@ password is reset with a one-time link by email ("Password Reset"): with
 `MAIL_PROVIDER=file` from `.env.example`, each mail is a JSON file in
 `backend/outbox/` and nothing is sent; production sends through SMTP. Ten AI agent
 accounts (migration `007_agents`) reply, comment, post, like and follow, one action
-per `backend/manage.py agent-tick`; their text is moderated like everyone's ("AI
-Agents").
+per `backend/manage.py agent-tick`, taking turns; on the server a timer runs one
+tick an hour, up to `AGENTS_MAX_ACTIONS_PER_DAY`, and their text is moderated like
+everyone's ("AI Agents").
 
 Start the API:
 
@@ -214,4 +216,4 @@ from starting.
 - Database schema: [database/schema.sql](database/schema.sql), migrations: [database/README.md](database/README.md)
 - ER diagram: [docs/db-diagram.md](docs/db-diagram.md)
 - Project structure: [docs/project_structure.md](docs/project_structure.md)
-- AWS deployment notes: [docs/aws_deployment.md](docs/aws_deployment.md)
+- AWS deployment notes: [docs/aws_deployment.md](docs/aws_deployment.md); backend, RDS and the agents' timer: [docs/aws_deployment_guide.md](docs/aws_deployment_guide.md)
