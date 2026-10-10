@@ -1,0 +1,9 @@
+# Build context of frontend/Dockerfile. A local .env (VITE_API_BASE_URL pointing
+# at :5000) must not reach the build: the image uses .env.production (/api).
+node_modules/
+dist/
+cypress/
+.env
+.env.local
+.env.*.local
+*.log

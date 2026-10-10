@@ -1,0 +1,124 @@
+# PulseNet in containers, for local runs and CI's E2E job (production stays on the
+# EC2 with systemd + nginx, see docs/). One command builds and starts everything:
+#
+#   docker compose up --build             # then http://localhost:8080
+#   docker compose --profile agents up    # ...plus the AI agents, one tick an hour
+#   docker compose down                   # stop (add -v to delete the data too)
+#
+#   db        MySQL 8.4, the version RDS runs; data in the dbdata volume
+#   migrate   backend/migrate.py once (the same migrations RDS gets), then exits
+#   backend   the Flask API under gunicorn, after migrate succeeded
+#   frontend  nginx: the production build, /api and /uploads proxied to backend
+#   agents    (profile "agents") manage.py agent-tick, then sleep, in a loop
+#
+# Settings: the ${VAR:-default} values below come from your shell or from a .env
+# file next to this one (copy .env.example). Compose never reads backend/.env,
+# and the image has none: do not copy it here, and never put the production AWS
+# key, RDS or SMTP credentials in this environment. The LLM is off unless
+# LLM_PROVIDER is set. Check what Compose resolved, without printing it:
+#   python scripts/compose_preflight.py
+
+name: pulsenet
+
+x-backend-build: &backend-build
+  context: .
+  dockerfile: backend/Dockerfile
+
+# What every backend container gets (backend/.env.example documents each one).
+x-backend-env: &backend-env
+  DB_HOST: db
+  DB_USER: pulsenet
+  DB_PASSWORD: ${DB_PASSWORD:-pulsenet}
+  DB_NAME: ${DB_NAME:-pulsenet_db}
+  LLM_PROVIDER: ${LLM_PROVIDER:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_DAILY_LIMIT: ${LLM_DAILY_LIMIT:-100}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-15}
+  AI_USER_DAILY_LIMIT: ${AI_USER_DAILY_LIMIT:-20}
+  # Password-reset mails are JSON files in the outbox volume, never sent:
+  #   docker compose exec backend sh -c 'cat outbox/*.json'
+  MAIL_PROVIDER: file
+  APP_BASE_URL: http://localhost:${WEB_PORT:-8080}
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-pulsenet-root}
+      MYSQL_DATABASE: ${DB_NAME:-pulsenet_db}
+      MYSQL_USER: pulsenet
+      MYSQL_PASSWORD: ${DB_PASSWORD:-pulsenet}
+    volumes:
+      - dbdata:/var/lib/mysql
+    # Over TCP: the first-start init server listens on a socket only, so this
+    # passes once the real server is up.
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -u root --silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    restart: unless-stopped
+
+  migrate:
+    build: *backend-build
+    image: pulsenet-backend
+    command: ["python", "migrate.py"]
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: *backend-build
+    image: pulsenet-backend
+    environment: *backend-env
+    volumes:
+      - uploads:/app/backend/uploads
+      - outbox:/app/backend/outbox
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # The slim image has no curl. test-db answers 500 while the DB is unreachable.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/test-db', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: pulsenet-frontend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One agent does one thing per tick (backend/agents/); with the LLM off they only
+  # like and follow. A text action is 2 LLM calls, so set LLM_DAILY_LIMIT with care.
+  agents:
+    profiles: [agents]
+    build: *backend-build
+    image: pulsenet-backend
+    command: ["sh", "-c", "while :; do python manage.py agent-tick; sleep \"$${AGENTS_TICK_SECONDS}\"; done"]
+    environment:
+      <<: *backend-env
+      AGENTS_ENABLED: ${AGENTS_ENABLED:-1}
+      AGENTS_MAX_ACTIONS_PER_DAY: ${AGENTS_MAX_ACTIONS_PER_DAY:-20}
+      AGENTS_TICK_SECONDS: ${AGENTS_TICK_SECONDS:-3600}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  dbdata:
+  uploads:
+  outbox:
