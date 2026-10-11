@@ -15,7 +15,9 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
         sys.path.insert(0, str(_p))
 
 from agents import SKILLS, skills, store  # noqa: E402
+from agents.personas import INTERESTS  # noqa: E402
 from agents.store import Agent  # noqa: E402
+from content import sanitize_html, to_html  # noqa: E402
 from llm import LLMBadReply, parse_json_object  # noqa: E402
 from support import FakeConn  # noqa: E402
 
@@ -195,7 +197,9 @@ class ParsePostTests(unittest.TestCase):
             "tags not a list": _post_reply(tags="css"),
             "too many tags": _post_reply(tags=["a", "b", "c", "d", "e"]),
             "tag with a space": _post_reply(tags=["web dev"]),
+            "tags only list numbers": _post_reply(tags=["1", "3b"]),
             "tag not text": _post_reply(tags=[3]),
+            "a tag not text among good ones": _post_reply(tags=["css", 3]),
             "body only markup": _post_reply(body_markdown="<script></script>" * 20),
             "not json": "Sure! Here is a post.",
         }
@@ -224,7 +228,8 @@ class CourseReplyTests(unittest.TestCase):
         post = skills.parse_post(reply)
 
         self.assertEqual(post.title, "Efficient Code Review Practices for Mobile Developers")
-        self.assertEqual(post.tags, ("1", "code", "review"))
+        self.assertIn('"tags": ["1", "code", "review"]', reply)   # as the model gave them
+        self.assertEqual(post.tags, ("code", "review"))           # the "1" is not a tag
         self.assertTrue(post.body.startswith("When it comes to code reviews"))
         self.assertIn("<strong>Takeaway</strong>", post.body_html)
 
@@ -267,6 +272,108 @@ class CourseReplyTests(unittest.TestCase):
         _, system = WRITE_POST.build(AGENT, {"topic": "css", "recent_titles": []})
         self.assertIn("80 to 150 words", system)
         self.assertNotIn("350", system)
+
+
+class TagNameTests(unittest.TestCase):
+    def test_a_tag_is_trimmed_lower_case_and_without_a_hash(self):
+        for raw, name in ((" #Rust ", "rust"), ("CSS", "css"), ("a11y", "a11y"), ("k8s", "k8s"),
+                          ("ai", "ai"), ("memoryefficiency", "memoryefficiency"), ("x" * 30, "x" * 30)):
+            with self.subTest(raw=raw):
+                self.assertEqual(skills.tag_name(raw), name)
+
+    def test_numbers_list_markers_and_malformed_names_are_not_tags(self):
+        # The first five are the tags the course model gave production posts 38 and 39.
+        for raw in ("1", "3", "5", "1a", "3b", "2024", "c", "", " ", "#", "web dev", "c++",
+                    "node.js", "x" * 31, 3, None):
+            with self.subTest(raw=raw):
+                self.assertIsNone(skills.tag_name(raw))
+
+    def test_every_interest_of_the_agents_is_a_tag(self):
+        for interest in {tag for tags in INTERESTS.values() for tag in tags}:
+            with self.subTest(interest=interest):
+                self.assertEqual(skills.tag_name(interest), interest)
+
+
+class HashtagLineTests(unittest.TestCase):
+    def test_a_hashtag_line_stays_text_and_gives_its_hashtags(self):
+        body, hashtags = skills.hashtag_lines("Some text.\n\n#rust #Beginners  #performance")
+
+        self.assertEqual(hashtags, ["rust", "Beginners", "performance"])
+        self.assertEqual(body, "Some text.\n\n\\#rust #Beginners  #performance")
+        self.assertEqual(to_html(body), "<p>Some text.</p>\n<p>#rust #Beginners  #performance</p>")
+
+    def test_only_whole_hashtag_lines_outside_code_count(self):
+        body_md = "\n".join([
+            "# A heading",                       # a space after the "#"
+            "## Another heading",
+            "I write C# and keep #fff for text.",  # hashtags inside a sentence
+            "Colour: #fff",
+            "    #include",                      # an indented code block
+            "```c",
+            "#include",                          # between fences
+            "```",
+        ])
+        self.assertEqual(skills.hashtag_lines(body_md), (body_md, []))
+
+
+# Production posts 38 and 39 (2026-10-11) were stored with the tags 1, 3, 5 and 1a,
+# 3b, and ended in an <h1> of their hashtags. Their replies are not kept anywhere, so
+# these fixtures are reconstructed: "tags" as stored, and Markdown that the old
+# parse turned into exactly the stored body_html.
+PRODUCTION_POSTS = {
+    "post_38_reconstructed.json": (["1", "3", "5"], "rust #beginners #performance #memoryefficiency",
+                                   ("rust", "beginners", "performance", "memoryefficiency")),
+    "post_39_reconstructed.json": (["1a", "3b"], "beginners #opensource #firstcontribution",
+                                   ("beginners", "opensource", "firstcontribution")),
+}
+
+
+class ProductionTagTests(unittest.TestCase):
+    def test_the_hashtags_become_the_tags_and_the_numbers_are_dropped(self):
+        for name, (stored_tags, heading, tags) in PRODUCTION_POSTS.items():
+            with self.subTest(name):
+                reply = _course_reply(name)
+                answer = json.loads(reply)
+                self.assertEqual(answer["tags"], stored_tags)
+                # What the old parse stored: the hashtag line as a heading.
+                old_html = sanitize_html(to_html(answer["body_markdown"]))
+                self.assertTrue(old_html.endswith(f"<h1>{heading}</h1>"))
+
+                post = skills.parse_post(reply)
+
+                self.assertEqual(post.tags, tags)
+                self.assertNotIn("<h1>", post.body_html)
+                self.assertTrue(post.body_html.endswith(f"<p>#{heading}</p>"))
+                self.assertTrue(post.body.endswith(f"#{heading}"))
+                # Only the last line changed.
+                self.assertEqual(post.body_html.rsplit("\n", 1)[0], old_html.rsplit("\n", 1)[0])
+
+    def test_the_given_tags_come_first_then_the_hashtags_once_each_and_at_most_four(self):
+        body = "Use **grid**. " * 30 + "\n\n#CSS #grid #layout #webdev #frontend"
+
+        post = skills.parse_post(_post_reply(tags=["css", "#Layout", "1"], body_markdown=body))
+
+        self.assertEqual(post.tags, ("css", "layout", "grid", "webdev"))
+
+    def test_hashtags_that_are_not_tags_are_dropped_but_the_line_stays_text(self):
+        body = "Use **grid**. " * 30 + "\n\n#1 #3b #grid"
+
+        post = skills.parse_post(_post_reply(tags=["2"], body_markdown=body))
+
+        self.assertEqual(post.tags, ("grid",))
+        self.assertTrue(post.body_html.endswith("<p>#1 #3b #grid</p>"))
+
+    def test_a_post_with_no_real_tag_is_a_bad_reply(self):
+        with self.assertRaisesRegex(LLMBadReply, "no meaningful tag"):
+            skills.parse_post(_post_reply(tags=["1", "3b"]))
+
+    def test_the_prompt_asks_for_topical_tags_that_match_the_hashtags(self):
+        _, system = WRITE_POST.build(AGENT, {"topic": "css", "recent_titles": []})
+
+        self.assertIn('"tags" holds 1 to 4 topical tags', system)
+        self.assertIn("starts with a letter, never a number or a list marker", system)
+        self.assertIn("If the body ends with hashtags, they are the same tags.", system)
+        self.assertNotIn("letters and digits only", system)
 
 
 class PostIsDueTests(unittest.TestCase):

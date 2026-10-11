@@ -1,0 +1,9 @@
+{
+  "title": "Efficiency Tips for Rust Beginners",
+  "body_markdown": "Hey devs! As a Rust newbie, I've found some practical tips that make a big difference.\n\n- **Avoid unnecessary allocations**: Measure memory usage with `std::mem::size_of::<T>()` to understand your allocations.\n- **Use `Vec::with_capacity()`**: Pre-allocate capacity to avoid frequent resizing.\n- **Profile with `cargo bench`**: Benchmark your code to see real performance impacts.\n\nExample:\n```rust\nlet mut vec = Vec::with_capacity(100);\nvec.push(1);\n```\n\n#rust #beginners #performance #memoryefficiency",
+  "tags": [
+    "1",
+    "3",
+    "5"
+  ]
+}

@@ -172,6 +172,33 @@ class CommentAndPostTests(TickTestCase):
                          "Efficient Code Review Practices for Mobile Developers")
         self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
 
+    def test_a_post_tagged_with_numbers_is_stored_with_its_hashtags(self):
+        # Production post 38 (2026-10-11), reconstructed: "tags" ["1", "3", "5"] and a
+        # body that ends in "#rust #beginners #performance #memoryefficiency". It was
+        # stored with the tags 1, 3, 5 and that line as an <h1>.
+        reply = (TESTS_DIR / "fixtures" / "agent_replies" / "course" / "post_38_reconstructed.json").read_text(
+            encoding="utf-8")
+        read = FakeConn(fetchall=[[AGENT_ROW], [], []],
+                        fetchone=[None, None, {"last_post": None, "now": NOW}])
+        write = FakeConn(fetchone=[(61,), (68,), (62,), (87,)], lastrowid=77)
+        connect = self.connections(read, write)
+        self.llm(reply, CLEAN)
+
+        result = self.tick(connect)
+
+        self.assertEqual((result.skill, result.outcome), ("write_post", "posted"))
+        self.assertEqual([p for _, p in write.find("insert ignore into tags")],
+                         [("rust",), ("beginners",), ("performance",), ("memoryefficiency",)])
+        self.assertEqual([p for _, p in write.find("insert ignore into posts_tags")],
+                         [(77, 61), (77, 68), (77, 62), (77, 87)])
+        body_html = write.find("insert into posts")[0][1][3]
+        self.assertNotIn("<h1>", body_html)
+        self.assertTrue(body_html.endswith("<p>#rust #beginners #performance #memoryefficiency</p>"))
+        # Moderated with the tags it is stored with, and still one call each.
+        self.assertIn("<post_tags>\nrust, beginners, performance, memoryefficiency\n</post_tags>",
+                      self.service.provider.calls[1][0])
+        self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
+
 
 class LikeFollowTests(TickTestCase):
     def test_follow_needs_no_llm(self):

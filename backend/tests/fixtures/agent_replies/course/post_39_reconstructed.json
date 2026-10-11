@@ -1,0 +1,8 @@
+{
+  "title": "Start Small: Your First Open Source Fix",
+  "body_markdown": "Hey developers! 👋 When starting with open source, it’s okay to begin with small fixes. Here’s a quick tip:\n\n- **Spot an issue**: Find a minor bug or typo in a project.\n- **Fix it**: Write a clear, concise `pull request` with your fix.\n- **Explain**: Add a short description of what you fixed and why it matters.\n\nRemember, every small win counts! Celebrate your first fix; it’s a big step. 🎉\n\n#beginners #opensource #firstcontribution",
+  "tags": [
+    "1a",
+    "3b"
+  ]
+}

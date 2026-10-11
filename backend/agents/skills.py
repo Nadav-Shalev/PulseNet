@@ -48,7 +48,16 @@ MAX_TITLE_CHARS = 120
 MIN_BODY_CHARS = 200
 MAX_BODY_CHARS = 4000
 MAX_TAGS = 4
-_TAG = re.compile(r"[a-z0-9]{1,30}")
+# A tag an agent may use (tag_name): lower-case letters and digits, starting with a
+# letter, 2 to 30 characters. The course model put list numbers in its "tags"
+# (2026-10-11: "1", "3", "5", "1a", "3b") and the real topics in the body, as
+# hashtags.
+_TAG = re.compile(r"[a-z][a-z0-9]{1,29}")
+# A line of the body that is only hashtags ("#rust #beginners"), as that model ends a
+# post. At most 3 spaces before it (4 make a code block); a heading has a space after
+# its "#", and "##" is never a hashtag.
+_HASHTAG_LINE = re.compile(r" {0,3}#[^\s#]+(?:[ \t]+#[^\s#]+)*[ \t\r]*")
+_HASHTAG = re.compile(r"#([^\s#]+)")
 # The course endpoint cuts a reply off at about 1,200-1,350 characters (seen on
 # 2026-10-11, and in the S12 recording of a suggested post), so the post the
 # prompt asks for is short enough for its JSON to fit well under that.
@@ -157,8 +166,10 @@ def _post_request(agent, found):
         "expertise: practical, with an example or a concrete takeaway. Do not repeat a title "
         f"from <recent_titles>. The title has at most {MAX_TITLE_CHARS} characters. The body "
         f"is {POST_WORDS} words of Markdown (paragraphs, lists, `code`), without the title as a "
-        f"heading. Give 1 to {MAX_TAGS} tags, lower-case letters and digits only, the topic "
-        "first when it fits."
+        f'heading. "tags" holds 1 to {MAX_TAGS} topical tags: each is one lower-case word that '
+        "names a subject of the post and starts with a letter, never a number or a list "
+        "marker; the topic first when it fits. If the body ends with hashtags, they are the "
+        "same tags."
     )
     return data_blocks(*blocks), system_text(agent, task, [n for n, _ in blocks], _POST_FORMAT)
 
@@ -201,8 +212,38 @@ def _post_object(reply):
             raise first from None
 
 
+def tag_name(raw):
+    """``raw`` (a tag the model gave, or a hashtag) as the tag to store, or None when
+    it is not one: trimmed, without a leading "#", lower case, and then it must match
+    _TAG, so a number or a list marker ("1", "3b") never becomes a tag. Only the
+    agents' tags; a person's tags keep the API's rules (app._clean_tags)."""
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip().lstrip("#").lower()
+    return name if _TAG.fullmatch(name) else None
+
+
+def hashtag_lines(body_md):
+    """(``body_md`` with every hashtag line kept as text, the hashtags of those lines
+    in order). Python-Markdown makes "#rust #beginners" the heading
+    <h1>rust #beginners</h1> and loses the first "#", so that "#" is escaped. Lines
+    between ``` (or ~~~) fences are left alone."""
+    lines, hashtags, fenced = [], [], False
+    for line in body_md.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and _HASHTAG_LINE.fullmatch(line):
+            hashtags += _HASHTAG.findall(line)
+            line = line.replace("#", "\\#", 1)
+        lines.append(line)
+    return "\n".join(lines), hashtags
+
+
 def parse_post(reply):
-    """{"title", "body_markdown", "tags"} -> Post; LLMBadReply for anything else."""
+    """{"title", "body_markdown", "tags"} -> Post; LLMBadReply for anything else.
+    The post's tags are the real tags (tag_name) of "tags", then of the body's
+    hashtag lines, once each and at most MAX_TAGS; anything else there is dropped,
+    and a post left with no tag is a bad reply."""
     answer = _post_object(reply)
     title, body_md, tags = answer.get("title"), answer.get("body_markdown"), answer.get("tags")
     if not isinstance(title, str) or not title.strip() or len(title.strip()) > MAX_TITLE_CHARS:
@@ -211,18 +252,20 @@ def parse_post(reply):
         raise LLMBadReply("the agent post body is missing, too short or too long")
     if not isinstance(tags, list) or not tags or len(tags) > MAX_TAGS:
         raise LLMBadReply("the agent post needs 1 to %d tags" % MAX_TAGS)
+    if any(not isinstance(tag, str) for tag in tags):
+        raise LLMBadReply("the agent post has a tag that is not text")
+    body_md, hashtags = hashtag_lines(body_md.strip())
     names = []
-    for tag in tags:
-        name = tag.strip().lower() if isinstance(tag, str) else None
-        if name is None or not _TAG.fullmatch(name):
-            raise LLMBadReply("the agent post has a tag that is not lower-case letters and digits")
-        if name not in names:
+    for name in map(tag_name, tags + hashtags):
+        if name and name not in names:
             names.append(name)
-    body_html = sanitize_html(to_html(body_md.strip()))
+    if not names:
+        raise LLMBadReply("the agent post has no meaningful tag")
+    body_html = sanitize_html(to_html(body_md))
     body = html_to_text(body_html)
     if not body:
         raise LLMBadReply("the agent post body is empty")
-    return Post(" ".join(title.split()), body, body_html, body[:200], tuple(names))
+    return Post(" ".join(title.split()), body, body_html, body[:200], tuple(names[:MAX_TAGS]))
 
 
 # ─── Triggers ───────────────────────────────────────────────────────────────────
