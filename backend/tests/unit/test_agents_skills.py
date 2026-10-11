@@ -451,13 +451,14 @@ class CommentRankingTests(unittest.TestCase):
     def test_equal_heat_goes_to_the_newest_then_the_highest_id_in_any_order(self):
         # Heat 0.125 for all four: 1 / 4 ** 1.5 at two hours with no likes, and
         # 8 / 16 ** 1.5 at fourteen hours with 7 likes.
-        rows = [_candidate(11, age_minutes=120, likes=0), _candidate(6, age_minutes=120, likes=0),
-                _candidate(4, age_minutes=840, likes=7), _candidate(9, age_minutes=840, likes=7)]
+        # The newest win although their ids are lower (seeded posts are like that).
+        rows = [_candidate(4, age_minutes=120, likes=0), _candidate(6, age_minutes=120, likes=0),
+                _candidate(11, age_minutes=840, likes=7), _candidate(9, age_minutes=840, likes=7)]
         self.assertEqual(len({skills.post_heat(row) for row in rows}), 1)
         for order in itertools.permutations(rows):
             with self.subTest(order=[row["post_id"] for row in order]):
-                self.assertEqual(skills.best_post(list(order))["post_id"], 11)
-        self.assertEqual(self.best(*rows[2:]), 9)
+                self.assertEqual(skills.best_post(list(order))["post_id"], 6)
+        self.assertEqual(self.best(*rows[2:]), 11)
 
     def test_nothing_to_rank(self):
         self.assertIsNone(skills.best_post([]))
