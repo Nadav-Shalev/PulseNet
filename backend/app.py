@@ -2280,6 +2280,9 @@ def get_trending_tags():
 
 @app.route("/api/test-db")
 def test_db():
+    """Health check: {"status": "ok"} when the database answers, else a generic
+    503. The driver's message names the DB host (the RDS endpoint), so it never
+    goes into the response; the server log gets only its class and errno."""
     try:
         conn   = get_db_connection()
         cursor = conn.cursor()
@@ -2289,7 +2292,9 @@ def test_db():
         conn.close()
         return jsonify({"status": "ok"})
     except Exception as exc:
-        return jsonify({"status": "error", "detail": str(exc)}), 500
+        app.logger.warning("test-db: database unavailable (%s, errno %s)",
+                           type(exc).__name__, getattr(exc, "errno", None))
+        return jsonify({"error": "database unavailable"}), 503
 
 
 if __name__ == "__main__":

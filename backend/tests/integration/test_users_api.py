@@ -3,12 +3,16 @@
 Covers PATCH /api/me, user search, the user list, profiles with their viewer flags
 (``is_self`` / ``is_following``), follower/following lists, tag autocomplete and
 the /api/test-db probe. Of these, only user search falls back to mock_data when
-MySQL is unreachable; the others answer 503 (or 500 for the probe).
+MySQL is unreachable; the others answer 503, and so does the probe, with a
+generic body that never carries the driver's message (it names the DB host).
 """
 
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import mysql.connector
 
 HERE = Path(__file__).resolve().parent
 TESTS_DIR = HERE.parent
@@ -17,6 +21,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+import app  # noqa: E402
 from support import FakeConn, client, db_down, patch_db  # noqa: E402
 
 
@@ -368,6 +373,12 @@ class TagSearchTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
 
+# The probe's failure in production (2026-10-11), with a made-up host in place of
+# the RDS endpoint.
+PROBE_HOST = "database-x.abc123example.eu-central-1.rds.amazonaws.com"
+PROBE_DRIVER_ERROR = f"2003 (HY000): Can't connect to MySQL server on '{PROBE_HOST}:3306' (113)"
+
+
 class TestDbProbeTests(unittest.TestCase):
     def test_reachable_db_reports_ok(self):
         conn = FakeConn(fetchone=[(1,)])
@@ -378,12 +389,40 @@ class TestDbProbeTests(unittest.TestCase):
         self.assertTrue(conn.ran("select 1"))
         self.assertTrue(conn.closed)
 
-    def test_unreachable_db_reports_error(self):
-        with db_down():
+    def assertGeneric503(self, resp):
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.get_json(), {"error": "database unavailable"})
+        body = resp.get_data(as_text=True)
+        for leak in (PROBE_HOST, "rds.amazonaws.com", "3306", "2003", "HY000", "Can't connect",
+                     "InterfaceError"):
+            self.assertNotIn(leak, body)
+
+    def test_unreachable_db_is_a_generic_503_without_the_driver_message(self):
+        # What the probe answered in production on 2026-10-11 with RDS stopped:
+        # 500 and the driver's message, RDS endpoint included.
+        error = mysql.connector.errors.InterfaceError(PROBE_DRIVER_ERROR)
+        with patch.object(app, "get_db_connection", side_effect=error), \
+             self.assertLogs(app.app.logger, level="WARNING") as logs:
             resp = client().get("/api/test-db")
 
-        self.assertEqual(resp.status_code, 500)
-        self.assertEqual(resp.get_json()["status"], "error")
+        self.assertGeneric503(resp)
+        # The server log says what kind of failure it was, still without the host.
+        self.assertIn("InterfaceError", logs.output[0])
+        self.assertNotIn(PROBE_HOST, logs.output[0])
+
+    def test_a_failing_query_is_the_same_generic_503(self):
+        conn = FakeConn()
+        error = mysql.connector.errors.OperationalError(f"2013: Lost connection to '{PROBE_HOST}'")
+        with patch_db(conn), patch.object(conn, "cursor", side_effect=error), self.assertLogs(app.app.logger):
+            resp = client().get("/api/test-db")
+
+        self.assertGeneric503(resp)
+
+    def test_the_usual_db_down_too(self):
+        with db_down(), self.assertLogs(app.app.logger):
+            resp = client().get("/api/test-db")
+
+        self.assertGeneric503(resp)
 
 
 if __name__ == "__main__":
