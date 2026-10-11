@@ -17,6 +17,7 @@ import recommend
 
 REPLY_WINDOW_HOURS = 72      # a comment older than this is not answered any more
 COMMENT_WINDOW_HOURS = 48    # posts an agent may comment on
+COMMENT_CANDIDATES = 50      # of those, the most skills.best_post ranks
 TRENDING_DAYS = 7            # trending tags count the posts of this window
 TRENDING_LIMIT = 5
 LIKE_WINDOW_DAYS = 7
@@ -123,19 +124,25 @@ def trending_tags(cursor):
     return [row["name"] for row in recommend.trending_tags(cursor, TRENDING_DAYS * 24, TRENDING_LIMIT)]
 
 
-def post_to_comment(cursor, agent_id, topics, interests):
-    """A recent post by someone else, tagged with one of ``topics``, that the agent
-    has not commented on, as a dict, or None. Posts that carry one of ``interests``
-    come first, then those with the fewest agent comments (so agents spread out
-    instead of all answering the same post), then the newest by created_at: ids do
-    not follow time for posts seeded with an age (demo_content)."""
+def posts_to_comment(cursor, agent_id, topics, interests):
+    """The recent posts the agent may comment on, as dicts (skills.best_post picks
+    one): by someone else (not banned), from the last COMMENT_WINDOW_HOURS, tagged
+    with one of ``topics``, and not commented on by the agent yet. Each carries what
+    the ranking needs: interest_hit (1 when it has one of ``interests``), its age in
+    minutes by MySQL's clock, its likes, and its comments by people and by agents.
+    At most COMMENT_CANDIDATES: those on an interest first, then the newest (ids do
+    not follow time for posts seeded with an age, demo_content)."""
     if not topics:
-        return None
+        return []
     marks = ", ".join(["%s"] * len(topics))
     score = f"MAX(t.name IN ({', '.join(['%s'] * len(interests))}))" if interests else "0"
     cursor.execute(
         f"SELECT p.id AS post_id, p.title AS post_title, p.body AS post_body, "
         f"u.username AS post_author, {score} AS interest_hit, "
+        "TIMESTAMPDIFF(MINUTE, p.created_at, NOW()) AS age_minutes, "
+        "(SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS likes, "
+        "(SELECT COUNT(*) FROM comments hc JOIN users hu ON hu.id = hc.author_id "
+        "WHERE hc.post_id = p.id AND NOT hu.is_agent) AS human_comments, "
         "(SELECT COUNT(*) FROM comments ac JOIN users au ON au.id = ac.author_id "
         "WHERE ac.post_id = p.id AND au.is_agent) AS agent_comments "
         "FROM posts p JOIN users u ON u.id = p.author_id "
@@ -145,10 +152,10 @@ def post_to_comment(cursor, agent_id, topics, interests):
         f"AND t.name IN ({marks}) "
         "AND NOT EXISTS (SELECT 1 FROM comments mine WHERE mine.post_id = p.id AND mine.author_id = %s) "
         "GROUP BY p.id, p.title, p.body, u.username, p.created_at "
-        "ORDER BY interest_hit DESC, agent_comments, p.created_at DESC, p.id DESC LIMIT 1",
-        (*interests, agent_id, *topics, agent_id),
+        "ORDER BY interest_hit DESC, p.created_at DESC, p.id DESC LIMIT %s",
+        (*interests, agent_id, *topics, agent_id, COMMENT_CANDIDATES),
     )
-    return cursor.fetchone()
+    return cursor.fetchall()
 
 
 def last_post(cursor, agent_id):

@@ -1,6 +1,7 @@
 """The agents' skills one piece at a time: the prompts, the reply checks, and the
 SQL each trigger runs (on a FakeConn cursor; no real MySQL)."""
 
+import itertools
 import json
 import sys
 import unittest
@@ -39,6 +40,15 @@ def _waiting(**over):
     row = {"comment_id": 41, "comment_html": "<p>Nice post, but why hooks?</p>", "comment_author": "ada",
            "thread_id": 40, "thread_html": "<p>Great intro to React.</p>",
            "post_id": 7, "post_title": "React hooks", "post_body": "Hooks let you..."}
+    row.update(over)
+    return row
+
+
+def _candidate(post_id, **over):
+    """A row of store.posts_to_comment: by default on the agent's interests, an hour
+    old, and nobody has liked or answered it yet."""
+    row = {"post_id": post_id, "post_title": f"Post {post_id}", "post_body": "B", "post_author": "ada",
+           "interest_hit": 1, "age_minutes": 60, "likes": 0, "human_comments": 0, "agent_comments": 0}
     row.update(over)
     return row
 
@@ -388,6 +398,71 @@ class PostIsDueTests(unittest.TestCase):
         self.assertFalse(skills.post_is_due(NOW - timedelta(hours=23, minutes=59), NOW))
 
 
+class CommentRankingTests(unittest.TestCase):
+    """best_post: relevance, then heat (fresh and engaged, crowded out by agents'
+    comments), then a fixed tie-break. Pure code: no SQL, no LLM."""
+
+    def best(self, *rows):
+        return skills.best_post(list(rows))["post_id"]
+
+    def test_a_post_on_the_agents_topics_beats_a_hotter_trending_one(self):
+        on_topic = _candidate(1, age_minutes=5 * 60)
+        trending_only = _candidate(2, interest_hit=0, age_minutes=30, likes=10, human_comments=3)
+
+        self.assertEqual(self.best(on_topic, trending_only), 1)
+
+    def test_among_posts_as_relevant_the_fresher_wins(self):
+        self.assertEqual(self.best(_candidate(1, age_minutes=600), _candidate(2, age_minutes=60)), 2)
+
+    def test_among_posts_as_relevant_and_as_fresh_the_more_engaged_wins(self):
+        self.assertEqual(self.best(_candidate(1), _candidate(2, likes=3)), 2)
+        self.assertEqual(self.best(_candidate(1), _candidate(2, human_comments=2)), 2)
+
+    def test_engagement_outweighs_a_few_hours(self):
+        # On the live site on 2026-10-11: post 32 (44 hours, 2 likes) before post 17
+        # (32.5 hours, none).
+        self.assertEqual(self.best(_candidate(17, age_minutes=1950), _candidate(32, age_minutes=2640, likes=2)), 32)
+
+    def test_an_old_post_does_not_win_on_its_old_likes(self):
+        old_and_famous = _candidate(1, age_minutes=47 * 60, likes=1000, human_comments=500)
+        fresh_and_quiet = _candidate(2, age_minutes=60)
+
+        self.assertEqual(self.best(old_and_famous, fresh_and_quiet), 2)
+        # The engagement counts up to ENGAGEMENT_CAP only.
+        self.assertEqual(skills.post_heat(_candidate(1, likes=skills.ENGAGEMENT_CAP)),
+                         skills.post_heat(_candidate(1, likes=1000)))
+
+    def test_agents_comments_crowd_a_post_out_and_are_not_engagement(self):
+        self.assertEqual(self.best(_candidate(1, agent_comments=1), _candidate(2)), 2)
+        self.assertLess(skills.post_heat(_candidate(1, agent_comments=3)), skills.post_heat(_candidate(1)))
+
+    def test_agents_spread_over_posts_about_as_good(self):
+        # Three agents in turn, three posts ten minutes apart: each comment sends the
+        # next agent to another post, instead of all three to the freshest.
+        posts = [_candidate(post_id, age_minutes=age) for post_id, age in ((1, 60), (2, 70), (3, 80))]
+        picks = []
+        for _agent in range(3):
+            best = skills.best_post(posts)
+            picks.append(best["post_id"])
+            best["agent_comments"] += 1
+
+        self.assertEqual(picks, [1, 2, 3])
+
+    def test_equal_heat_goes_to_the_newest_then_the_highest_id_in_any_order(self):
+        # Heat 0.125 for all four: 1 / 4 ** 1.5 at two hours with no likes, and
+        # 8 / 16 ** 1.5 at fourteen hours with 7 likes.
+        rows = [_candidate(11, age_minutes=120, likes=0), _candidate(6, age_minutes=120, likes=0),
+                _candidate(4, age_minutes=840, likes=7), _candidate(9, age_minutes=840, likes=7)]
+        self.assertEqual(len({skills.post_heat(row) for row in rows}), 1)
+        for order in itertools.permutations(rows):
+            with self.subTest(order=[row["post_id"] for row in order]):
+                self.assertEqual(skills.best_post(list(order))["post_id"], 11)
+        self.assertEqual(self.best(*rows[2:]), 9)
+
+    def test_nothing_to_rank(self):
+        self.assertIsNone(skills.best_post([]))
+
+
 class TriggerSqlTests(unittest.TestCase):
     def test_agents_that_may_act_are_agents_and_not_banned_in_turn_order(self):
         rows = [{"id": 133, "username": "dana_ai", "name": "Dana", "personality": "p", "last_skill": None},
@@ -456,13 +531,14 @@ class TriggerSqlTests(unittest.TestCase):
         self.assertIn("WHERE (ac.id = t.id OR ac.parent_id = t.id) AND au.is_agent) < %s", flat)
         self.assertEqual(params, (131, True, 131, 131, 131, skills.MAX_AGENT_TURNS))
 
-    def test_a_trending_post_prefers_the_agents_topics(self):
-        conn = FakeConn(fetchall=[[{"name": "webdev"}, {"name": "css"}]],
-                        fetchone=[{"post_id": 9, "post_title": "T", "post_body": "B", "post_author": "ada"}])
+    def test_the_posts_to_comment_on_and_what_their_ranking_needs(self):
+        older = _candidate(8, age_minutes=600)
+        newer = _candidate(9, age_minutes=60)
+        conn = FakeConn(fetchall=[[{"name": "webdev"}, {"name": "css"}], [older, newer]])
 
         found = COMMENT_TRENDING.find(conn.cursor(dictionary=True), AGENT, FirstChoice())
 
-        self.assertEqual(found["post_id"], 9)
+        self.assertEqual(found["post_id"], 9)                       # ranked in code: best_post
         # The same trending as the home page (recommend.py), over a week.
         self.assertTrue(conn.ran("from posts_tags pt"))
         self.assertTrue(conn.ran("interval %s hour"))
@@ -470,16 +546,22 @@ class TriggerSqlTests(unittest.TestCase):
         sql, params = conn.find("from posts p join users u")[0]
         flat = " ".join(sql.split())
         self.assertIn("MAX(t.name IN (%s, %s, %s, %s)) AS interest_hit", flat)
+        # Recent, by someone else, never a post the agent already commented on.
         self.assertIn("INTERVAL 48 HOUR AND p.author_id <> %s AND NOT u.is_banned", flat)
         self.assertIn("NOT EXISTS (SELECT 1 FROM comments mine WHERE mine.post_id = p.id AND mine.author_id = %s)", flat)
-        # Agents spread out: the fewest agent comments first, then the newest by time
-        # (seeded posts have ids that do not follow created_at).
+        # The age by MySQL's clock, the engagement, and the agents' comments (crowding).
+        self.assertIn("TIMESTAMPDIFF(MINUTE, p.created_at, NOW()) AS age_minutes", flat)
+        self.assertIn("(SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS likes", flat)
+        self.assertIn("(SELECT COUNT(*) FROM comments hc JOIN users hu ON hu.id = hc.author_id "
+                      "WHERE hc.post_id = p.id AND NOT hu.is_agent) AS human_comments", flat)
         self.assertIn("(SELECT COUNT(*) FROM comments ac JOIN users au ON au.id = ac.author_id "
                       "WHERE ac.post_id = p.id AND au.is_agent) AS agent_comments", flat)
-        self.assertIn("ORDER BY interest_hit DESC, agent_comments, p.created_at DESC, p.id DESC LIMIT 1", flat)
+        # A bounded list: the posts on its interests, then the newest by time (seeded
+        # posts have ids that do not follow created_at).
+        self.assertIn("ORDER BY interest_hit DESC, p.created_at DESC, p.id DESC LIMIT %s", flat)
         interests = ("react", "javascript", "css", "a11y")
         # topics: the interests, then the trending tags not among them, once each
-        self.assertEqual(params, (*interests, 131, *interests, "webdev", 131))
+        self.assertEqual(params, (*interests, 131, *interests, "webdev", 131, store.COMMENT_CANDIDATES))
 
     def test_an_agent_with_no_topics_scores_nothing_and_no_tags_means_no_post(self):
         stranger = AGENT._replace(username="new_ai")
@@ -488,7 +570,7 @@ class TriggerSqlTests(unittest.TestCase):
         self.assertIsNone(COMMENT_TRENDING.find(conn.cursor(dictionary=True), stranger, FirstChoice()))
         self.assertFalse(conn.ran("from posts p join users u"))    # nothing to look for
 
-        conn = FakeConn(fetchall=[[{"name": "go"}]], fetchone=[None])
+        conn = FakeConn(fetchall=[[{"name": "go"}]])
         self.assertIsNone(COMMENT_TRENDING.find(conn.cursor(dictionary=True), stranger, FirstChoice()))
         self.assertIn("0 AS interest_hit", conn.find("from posts p join users u")[0][0])
 

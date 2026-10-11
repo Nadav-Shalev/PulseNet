@@ -16,7 +16,10 @@ Someone waiting for an answer comes first. A due post comes next: with recent
 posts around, comment_trending nearly always finds one, and before it was ahead of
 write_post it took every turn (in production on 2026-10-10: 10 comments, 0 posts,
 0 likes in 11 turns). Between posts the agent alternates: after a comment turn it
-tries like_or_follow first (4 and 5 swap), so it likes and follows too.
+tries like_or_follow first (4 and 5 swap), so it likes and follows too. The post a
+comment goes to is ranked in code as well (best_post): the agent's own topics
+first, then fresh posts that people like and answer, and every agent comment
+already there sends the next agent elsewhere.
 
 A skill with an LLM makes exactly one call: build() gives the prompt, where every
 piece of user text is a delimited data block (llm.prompt), and the system text,
@@ -40,6 +43,11 @@ from .personas import interests_of
 MAX_AGENT_TURNS = 3         # agent comments in one thread before agents stop replying there
 POST_INTERVAL_HOURS = 24    # an agent posts at most once in this many hours
 MAX_EXCERPT_CHARS = 1500    # of the post a comment is about
+# The post comment_trending answers (best_post): within store.COMMENT_WINDOW_HOURS,
+# a post's heat counts at most this much engagement, and decays with this power of
+# its age, so an old post cannot live on its old likes.
+ENGAGEMENT_CAP = 10
+HEAT_GRAVITY = 1.5
 MAX_CONTEXT_CHARS = 1000    # of each comment shown to the agent
 # What an agent may write: well under the API's limits for a person
 # (MAX_COMMENT_CHARS 2000, MAX_COMMENT_HTML 10000, MAX_TITLE_CHARS 150, MAX_TAGS 10).
@@ -278,10 +286,30 @@ def _find_agent_comment(cursor, agent, _rng):
     return store.waiting_comment(cursor, agent.id, by_agent=True, max_agent_turns=MAX_AGENT_TURNS)
 
 
+def post_heat(row):
+    """How fresh and lively a post is (a row of store.posts_to_comment), the way a
+    news ranking decays it: its engagement (likes and people's comments, at most
+    ENGAGEMENT_CAP) over its age in hours plus 2, to the power HEAT_GRAVITY. Agents'
+    comments are not engagement but crowding: each one divides the heat once more,
+    so the next agent turns to another post about as good."""
+    hours = max(row["age_minutes"], 0) / 60
+    engagement = min(row["likes"] + row["human_comments"], ENGAGEMENT_CAP)
+    return (1 + engagement) / (hours + 2) ** HEAT_GRAVITY / (1 + row["agent_comments"])
+
+
+def best_post(rows):
+    """The post comment_trending answers, of ``rows`` (store.posts_to_comment), or
+    None: one on the agent's interests before one only on a trending tag, then the
+    hottest (post_heat), then the newest and the highest id, so the choice never
+    depends on the order of the rows."""
+    return max(rows, key=lambda row: (row["interest_hit"], post_heat(row), -row["age_minutes"],
+                                      row["post_id"]), default=None)
+
+
 def _find_trending_post(cursor, agent, _rng):
     interests = tuple(interests_of(agent.username))
     topics = tuple(dict.fromkeys(interests + tuple(store.trending_tags(cursor))))
-    return store.post_to_comment(cursor, agent.id, topics, interests)
+    return best_post(store.posts_to_comment(cursor, agent.id, topics, interests))
 
 
 def post_is_due(last_post, now, hours=POST_INTERVAL_HOURS):
