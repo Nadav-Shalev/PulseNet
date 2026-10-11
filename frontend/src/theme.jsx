@@ -1,11 +1,32 @@
-import { useMemo } from 'react';
+import { createContext, useCallback, useMemo, useState } from 'react';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import useMediaQuery from '@mui/material/useMediaQuery';
 
+const THEME_KEY = 'pulsenet.theme';
+const preferences = ['light', 'dark', 'system'];
+export const ThemePreferenceContext = createContext(null);
+
+function readPreference() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return preferences.includes(saved) ? saved : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
 // One palette owns both MUI surfaces and the rich text/editor inside them.
 export default function AppTheme({ children }) {
-  const dark = useMediaQuery('(prefers-color-scheme: dark)');
+  const [preference, setPreferenceState] = useState(readPreference);
+  const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
+  const dark = preference === 'system' ? systemDark : preference === 'dark';
+  const setPreference = useCallback((next) => {
+    if (!preferences.includes(next)) return;
+    setPreferenceState(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* Still usable without storage. */ }
+  }, []);
+  const preferenceValue = useMemo(() => ({ preference, setPreference }), [preference, setPreference]);
   const theme = useMemo(() => createTheme({
     palette: {
       mode: dark ? 'dark' : 'light',
@@ -60,5 +81,9 @@ export default function AppTheme({ children }) {
     },
   }), [dark]);
 
-  return <ThemeProvider theme={theme}><CssBaseline enableColorScheme />{children}</ThemeProvider>;
+  return (
+    <ThemePreferenceContext.Provider value={preferenceValue}>
+      <ThemeProvider theme={theme}><CssBaseline enableColorScheme />{children}</ThemeProvider>
+    </ThemePreferenceContext.Provider>
+  );
 }

@@ -124,56 +124,67 @@ export default function UserProfilePage() {
 
   return (
     <Box>
-      {/* Avatar above the details on phones, beside them from sm (600px) up. */}
+      {/* A decorative cover needs no additional profile fields or API calls. */}
       <Box
         data-testid="profile-header"
-        sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 3, mb: 3, p: { xs: 2, sm: 3 }, bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 2, textAlign: { xs: 'center', sm: 'start' } }}
+        sx={{ mb: 3, bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 2, textAlign: { xs: 'center', sm: 'start' } }}
       >
-        <Avatar
-          src={user.profile_image || user.avatar}
-          alt={user.name}
-          sx={{ width: 96, height: 96 }}
-        >
-          {user.name?.[0] ?? '?'}
-        </Avatar>
-        <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-          <Typography data-testid="profile-name" variant="h5" component="h1" fontWeight={700}>{user.name}</Typography>
-          <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
-          {user.is_agent && <AgentBadge data-testid="profile-agent-badge" sx={{ mt: 1 }} />}
-          {user.bio && (
-            <Typography data-testid="profile-bio" variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
-              {user.bio}
-            </Typography>
-          )}
-          <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
-            {countLink('followers', <><strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}</>)}
-            {countLink('following', <><strong>{user.following_count ?? 0}</strong> following</>)}
-            <Typography variant="body2" color="text.secondary">
-              <strong>{user.post_count ?? 0}</strong> {user.post_count === 1 ? 'post' : 'posts'}
-            </Typography>
+        <Box
+          data-testid="profile-cover"
+          aria-hidden="true"
+          sx={{
+            height: { xs: 128, sm: 180 }, borderRadius: '20px 20px 0 0',
+            bgcolor: '#172e45', backgroundImage: 'url("/profile-cover.svg")',
+            backgroundSize: 'cover', backgroundPosition: 'center',
+          }}
+        />
+        <Box sx={{ px: { xs: 2, sm: 3 }, pb: 3, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { xs: 'center', sm: 'flex-start' }, gap: { xs: 1.5, sm: 3 } }}>
+          <Avatar
+            src={user.profile_image || user.avatar}
+            alt={user.name}
+            sx={{ width: { xs: 96, sm: 112 }, height: { xs: 96, sm: 112 }, mt: -4, border: '4px solid', borderColor: 'background.paper', flexShrink: 0 }}
+          >
+            {user.name?.[0] ?? '?'}
+          </Avatar>
+          <Box sx={{ minWidth: 0, flex: 1, pt: { xs: 0, sm: 2 }, overflowWrap: 'anywhere' }}>
+            <Typography data-testid="profile-name" variant="h5" component="h1" fontWeight={700}>{user.name}</Typography>
+            <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
+            {user.is_agent && <AgentBadge data-testid="profile-agent-badge" sx={{ mt: 1 }} />}
+            {user.bio && (
+              <Typography data-testid="profile-bio" variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
+                {user.bio}
+              </Typography>
+            )}
+            <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
+              {countLink('followers', <><strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}</>)}
+              {countLink('following', <><strong>{user.following_count ?? 0}</strong> following</>)}
+              <Typography variant="body2" color="text.secondary">
+                <strong>{user.post_count ?? 0}</strong> {user.post_count === 1 ? 'post' : 'posts'}
+              </Typography>
+            </Box>
+            {canFollow && (
+              <Button
+                variant={following ? 'outlined' : 'contained'}
+                size="small"
+                onClick={handleToggleFollow}
+                disabled={followBusy}
+                sx={{ mt: 1.5 }}
+              >
+                {following ? 'Unfollow' : 'Follow'}
+              </Button>
+            )}
+            {followError && <Alert severity="error" sx={{ mt: 1 }}>{followError}</Alert>}
+            {isOwnProfile && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => navigate('/edit-profile')}
+                sx={{ mt: 1.5 }}
+              >
+                Edit Profile
+              </Button>
+            )}
           </Box>
-          {canFollow && (
-            <Button
-              variant={following ? 'outlined' : 'contained'}
-              size="small"
-              onClick={handleToggleFollow}
-              disabled={followBusy}
-              sx={{ mt: 1.5 }}
-            >
-              {following ? 'Unfollow' : 'Follow'}
-            </Button>
-          )}
-          {followError && <Alert severity="error" sx={{ mt: 1 }}>{followError}</Alert>}
-          {isOwnProfile && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => navigate('/edit-profile')}
-              sx={{ mt: 1.5 }}
-            >
-              Edit Profile
-            </Button>
-          )}
         </Box>
       </Box>
 

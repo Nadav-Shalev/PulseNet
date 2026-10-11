@@ -14,26 +14,29 @@ function noOverflow() {
 // Check actual rendered text against the composed surface, including translucent
 // MUI backgrounds. Disabled controls are intentionally outside the text check.
 function readableText() {
-  cy.get('h1,h2,h3,p,.MuiTypography-caption,.MuiButton-contained:not(:disabled),.MuiInputLabel-root:not(.Mui-disabled)').filter(':visible').each(el => {
-    const node = el[0];
-    if (!node.textContent.trim()) return;
-    const win = node.ownerDocument.defaultView;
-    const rgba = text => (text.match(/[\d.]+/g) || []).map(Number);
-    const blend = (fg, bg) => fg.slice(0, 3).map((v, i) => v * (fg[3] ?? 1) + bg[i] * (1 - (fg[3] ?? 1)));
-    const surface = element => {
-      if (!element) return [255, 255, 255];
-      const bg = rgba(win.getComputedStyle(element).backgroundColor);
-      return blend(bg, (bg[3] ?? 1) < 1 ? surface(element.parentElement) : [255, 255, 255]);
-    };
-    const luminance = rgb => rgb.map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
-      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
-    const style = win.getComputedStyle(node);
-    const bg = surface(node);
-    const a = luminance(blend(rgba(style.color), bg));
-    const b = luminance(bg);
-    const size = parseFloat(style.fontSize);
-    const minimum = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700) ? 3 : 4.5;
-    expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), node.textContent.slice(0, 65)).to.be.at.least(minimum);
+  cy.get('h1,h2,h3,p,.MuiTypography-caption,.MuiButton-contained:not(:disabled),.MuiInputLabel-root:not(.Mui-disabled)').filter(':visible').each(element => {
+    // MUI animates enabled/focus colors; retry the same contrast assertion as it settles.
+    cy.wrap(element).should(el => {
+      const node = el[0];
+      if (!node.textContent.trim()) return;
+      const win = node.ownerDocument.defaultView;
+      const rgba = text => (text.match(/[\d.]+/g) || []).map(Number);
+      const blend = (fg, bg) => fg.slice(0, 3).map((v, i) => v * (fg[3] ?? 1) + bg[i] * (1 - (fg[3] ?? 1)));
+      const surface = element => {
+        if (!element) return [255, 255, 255];
+        const bg = rgba(win.getComputedStyle(element).backgroundColor);
+        return blend(bg, (bg[3] ?? 1) < 1 ? surface(element.parentElement) : [255, 255, 255]);
+      };
+      const luminance = rgb => rgb.map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+        .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+      const style = win.getComputedStyle(node);
+      const bg = surface(node);
+      const a = luminance(blend(rgba(style.color), bg));
+      const b = luminance(bg);
+      const size = parseFloat(style.fontSize);
+      const minimum = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700) ? 3 : 4.5;
+      expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), node.textContent.slice(0, 65)).to.be.at.least(minimum);
+    });
   });
 }
 
@@ -65,6 +68,16 @@ describe('polish visual and accessibility checks', () => {
         cy.get('[data-testid="suggested-user"]').should('have.length', 2);
         cy.document().should(doc => expect(doc.defaultView.getComputedStyle(doc.documentElement).colorScheme).to.equal(mode));
         shot('home');
+        cy.get('[data-testid="nav-settings"]').click();
+        cy.get('[role="menu"][aria-label="Settings"]').should('be.visible');
+        cy.get('#settings-menu .MuiPaper-root').should('have.css', 'opacity', '1');
+        cy.screenshot(mode + '-' + width + '-settings', { capture: 'viewport', overwrite: true });
+        cy.get('[data-testid="settings-logout"]').click();
+        cy.get('[role="dialog"]').should('be.visible').and('contain', 'Log out');
+        cy.get('[role="dialog"]').should('have.css', 'opacity', '1');
+        cy.screenshot(mode + '-' + width + '-logout', { capture: 'viewport', overwrite: true });
+        cy.contains('[role="dialog"] button', 'Cancel').click();
+        cy.get('[role="dialog"]').should('not.exist');
         cy.contains('[data-testid="post-card"]', 'Building thoughtful').contains('button', 'Read More').click();
         cy.get('[data-testid="comment"]').should('exist');
         noOverflow();
