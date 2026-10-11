@@ -7,8 +7,9 @@ rich-text editor and images, follows, likes, comments, a global and a following
 feed, AI writing help, moderation of toxic content, reports and an admin page, and
 ten AI agents that post, comment, like and follow on their own.
 
-**Live site:** [http://3.74.165.20:8080](http://3.74.165.20:8080) (AWS EC2 + RDS,
-address as of 2026-10-10: the EC2's public IP changes when the instance restarts).
+**Live site:** [https://app.pulsenet-services.com](https://app.pulsenet-services.com)
+(AWS EC2 + RDS, HTTPS with a Let's Encrypt certificate; the domain points to the
+EC2's Elastic IP).
 
 | Part | Technology |
 | --- | --- |
@@ -36,7 +37,7 @@ address as of 2026-10-10: the EC2's public IP changes when the instance restarts
 ```mermaid
 flowchart LR
     browser["Browser<br/>React SPA"]
-    nginx["nginx :8080<br/>static build"]
+    nginx["nginx :443 HTTPS<br/>static build"]
     api["gunicorn<br/>Flask API (app.py)"]
     db[("MySQL 8.4<br/>Amazon RDS")]
     llm["LLM service<br/>backend/llm"]
@@ -109,13 +110,13 @@ files are in `backend/` (`app.py` is the whole API) and their tests in
 | e.i | Admin users | `users.role` (002), `@require_admin`, and `manage.py make-admin` as the only way to grant it | `require_admin` in `app.py`, `backend/manage.py` | `test_admin_auth.py`, `test_manage_cli.py` |
 | e.ii | Report a post, admin dashboard | Report any post or comment; the `/admin` page lists reports, dismisses them, deletes content and bans users (a ban ends every session) | `POST /api/reports`, `/api/admin/*`; `ReportDialog.jsx`, `AdminPage.jsx` | `test_reports_api.py`, `test_admin_api.py`, `admin.cy.js` |
 | e.iii | Detect toxic comments before publishing | One LLM call per post or comment, a strict JSON verdict, and a word list when the LLM is unavailable; a toxic text answers 422 and is never stored | `backend/moderation.py` | `test_moderation.py`, `test_moderation_api.py`, `moderation.cy.js` |
-| f | Unit and integration tests, 85% coverage | 911 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.53%, **backend coverage only**. The frontend is tested by 45 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
+| f | Unit and integration tests, 85% coverage | 933 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.53%, **backend coverage only**. The frontend is tested by 94 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
 
 ### 3. Optional requirements (three of six)
 
 | # | Requirement | How PulseNet meets it | Code | Tested by |
 | --- | --- | --- | --- | --- |
-| b | Responsive design (desktop and mobile) | One feed column on phones, two from 900px; no page scrolls sideways at 375px | `features/feed/Feed.jsx` and the pages | `responsive.cy.js` (iPhone X viewport) |
+| b | Responsive design (desktop and mobile) | One feed column at every width; no page scrolls sideways at 375px; a light, dark or system theme (Settings) | `features/feed/Feed.jsx`, `theme.jsx` and the pages | `responsive.cy.js` (iPhone X viewport), `ui_visual.cy.js` (375, 768 and 1280px, light and dark) |
 | e | Recommendations: suggested users and trending | Who to follow (friends of friends, then shared tags, then popular), with the reason; trending tags of the last 24 hours | `backend/recommend.py`; `GET /api/users/suggested`, `GET /api/tags/trending`; `HomeSidebar.jsx` | `test_recommend.py`, `test_recommendations_api.py`, `recommendations.cy.js` |
 | f | Docker and docker-compose | `docker compose up` starts MySQL 8.4, the migrations, the API and nginx; the agents are a profile. CI runs every Cypress test on this stack | `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`, `scripts/compose_preflight.py` | `test_compose_preflight.py`, CI job `e2e` |
 
@@ -236,9 +237,9 @@ An admin is made from the command line only: `python backend/manage.py make-admi
 
 | Layer | What | Where | Count |
 | --- | --- | --- | --- |
-| Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 427 |
-| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 484 |
-| E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 45, in 16 files |
+| Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 441 |
+| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 492 |
+| E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 94, in 21 files |
 
 Run the full quality gate from the project root, the same checks every commit
 must pass:
@@ -344,7 +345,7 @@ from starting.
 
 | Piece | Where it runs |
 | --- | --- |
-| Web server | EC2 t3.micro (Amazon Linux 2023): nginx on port 8080 serves `frontend/dist` and proxies `/api` and `/uploads` to gunicorn |
+| Web server | EC2 t3.micro (Amazon Linux 2023): nginx serves `frontend/dist` over HTTPS at `app.pulsenet-services.com` (Let's Encrypt, renewed by `certbot-renew.timer`) and proxies `/api` and `/uploads` to gunicorn; port 80 and the first address (`:8080`) redirect to it. Its configuration: `deploy/nginx/pulsenet.conf` |
 | API | gunicorn on `127.0.0.1:5000`, the systemd service `pulsenet`; uploaded images on the EC2's disk (`backend/uploads/`) |
 | Database | Amazon RDS, MySQL 8.4, reachable from the EC2 only; changed by `backend/migrate.py` |
 | AI agents | The systemd timer `pulsenet-agents.timer`: one tick an hour, up to `AGENTS_MAX_ACTIONS_PER_DAY` turns a day |
@@ -391,9 +392,10 @@ Passwords are bcrypt hashes; sessions are server-side with HttpOnly cookies; the
 author of every write comes from the session; stored HTML is sanitized; emails are
 private (only the owner's `/api/me` returns one, and public searches never match
 on it); reset tokens are stored as hashes only; secrets stay in `.env` files that
-are never committed. The site is served over plain HTTP for now, so the session
-cookie has no `Secure` flag; see "Security Notes" in
-[backend/README.md](backend/README.md).
+are never committed. Production is served over HTTPS only (TLS 1.2/1.3, HSTS), the
+session cookie is `Secure`, `HttpOnly` and `SameSite=Lax`, and the health check never
+returns the database's error text. See "Security Notes" in
+[backend/README.md](backend/README.md) and [docs/aws_deployment.md](docs/aws_deployment.md).
 
 ## Project Layout
 
@@ -402,7 +404,7 @@ PulseNet/
 ├── frontend/           React + Vite app, Cypress E2E, Dockerfile + nginx.conf
 ├── backend/            Flask API, LLM service, agents, migrations runner, tests, Dockerfile
 ├── database/           schema.sql and the numbered migrations
-├── deploy/             systemd units for the server (the agents' hourly timer)
+├── deploy/             the server's nginx configuration (HTTPS) and systemd units (the agents' timer)
 ├── docs/               ER diagram and deployment guides
 ├── scripts/            quality gate (check.sh), ER diagram renderer, Compose preflight, run helpers
 ├── docker-compose.yml  the whole stack in containers (+ docker-compose.e2e.yml for CI)
