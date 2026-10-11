@@ -1,4 +1,4 @@
-import { useContext, useState, useEffect, useRef } from 'react';
+import { useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Alert from '@mui/material/Alert';
 import Link from '@mui/material/Link';
@@ -35,6 +35,7 @@ import {
 } from '../api/api';
 import { UserContext } from '../context/UserContext';
 import CommentsSection from './CommentsSection';
+import PostBody from './PostBody';
 import ReportDialog from './ReportDialog';
 import { postTimeAgo } from '../utils/timeAgo';
 
@@ -49,7 +50,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const [detailError, setDetailError] = useState('');
   const detailRequest = useRef(0);
   const detailPending = useRef(false);
-  useEffect(() => () => { detailRequest.current++; }, [post.id]);
+  useEffect(() => () => { detailRequest.current++; detailPending.current = false; }, [post.id]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [tagBusy, setTagBusy] = useState(null);
@@ -69,9 +70,8 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   // Below sm (600px) the full post fills the screen instead of a narrow box.
   const isPhone = useMediaQuery(useTheme().breakpoints.down('sm'));
 
-  const handleOpen = async () => {
-    setOpen(true);
-    if (fullHtml !== null || detailPending.current) return;
+  const loadDetail = useCallback(async (retry = false) => {
+    if (fullHtml !== null || detailPending.current || (detailError && !retry)) return;
     const request = ++detailRequest.current;
     detailPending.current = true;
     setLoading(true);
@@ -84,6 +84,11 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
     } finally {
       if (request === detailRequest.current) { detailPending.current = false; setLoading(false); }
     }
+  }, [post.id, fullHtml, detailError]);
+
+  const handleOpen = () => {
+    setOpen(true);
+    loadDetail();
   };
 
   const handleDelete = async () => {
@@ -225,9 +230,13 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
           <Typography variant="h6" component="h2" gutterBottom>
             {post?.title || 'Untitled'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {post?.description || post?.content || ''}
-          </Typography>
+          <PostBody
+            html={fullHtml}
+            excerpt={post?.description || post?.content || ''}
+            loading={loading}
+            error={detailError}
+            onLoad={loadDetail}
+          />
           {post?.tag_list?.length > 0 && (
             <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
               {post.tag_list.map(tag => (
@@ -255,9 +264,6 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
           </Typography>
         )}
         <CardActions sx={{ px: 2, pb: 2, flexWrap: 'wrap', gap: 0.5, '& > :not(style) ~ :not(style)': { ml: 0 } }}>
-          <Button variant="contained" size="small" onClick={handleOpen}>
-            Read More
-          </Button>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             {/* Disabled until /api/me has answered, so a logged-in reader is never sent to /login. */}
             <IconButton
@@ -399,7 +405,7 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
               <CircularProgress aria-label="Loading post" />
             </Box>
           ) : detailError ? (
-            <Alert severity="error" action={<Button color="inherit" onClick={handleOpen}>Retry</Button>}>{detailError}</Alert>
+            <Alert severity="error" action={<Button color="inherit" onClick={() => loadDetail(true)}>Retry</Button>}>{detailError}</Alert>
           ) : (
             <Box
               className="rich-text"

@@ -51,12 +51,37 @@ During development, the targeted run passed all 10 new tests and 11 related exis
 
 Manual visual review completed for **102 browser captures** covering 17 screens/states at **375px, 768px, and 1280px in both light and dark themes**. This includes Settings/logout, Home/TopBar/sidebar, human and agent profiles, post/comments, editors, auth/reset, admin, long text, and empty/error states. Logs: `cypress/logs/settings-targeted.log`, `cypress/logs/settings-visual-retry.log`, and `cypress/logs/settings-full.log`.
 
+## Vertical feeds and inline bodies (2026-10-11)
+
+Baseline for this pass: **79 tests across 20 specs**, at `6376fb3`.
+
+- All feeds now use a single vertical column, including Global/Following, profiles, user-post pages, and tags. Existing page widths, feed pagination, and sidebar breakpoints stay intact.
+- Who to follow renders the first three API-ordered suggestions at every width and reveals the next loaded person after a successful follow.
+- `PostBody` owns its viewport observer (200px margin), resize observer, three-line visual clamp (shortened from six at the final review request), and Read More / Read Less controls. Both observers disconnect on cleanup. Missing observers fall back to loading on mount and measuring on window resize.
+- The component renders the complete server-sanitized HTML; no HTML strings are sliced or reconstructed. Only measured overflow exposes the toggle. A one-em fade softens the clipped edge so paragraph spacing cannot leave a hard cut through glyphs; links entering the fade also leave the tab order. Clipped anchors temporarily leave the keyboard tab order and regain it on expansion, using local rectangle checks without changing the document structure.
+- Each card reuses its existing detail request/result for the inline body and Comments dialog, deduplicates pending loads, ignores stale responses, and retains the excerpt with feedback/retry on failure. Comments, likes, reports, and management controls keep their existing behavior.
+- Logout lives only in Settings. `nav-logout` identifies the menu item and `settings-logout` its label; the same confirmation and current/all-device session workflow remain.
+
+### Intentional test updates
+
+The requested UX supersedes three former expectations: desktop cards side by side, Read More opening a dialog, and Logout being directly visible in navigation. Existing tests now check stacked cards, use Comments for dialog checks, and open Settings for logout. Logged-in state checks use the existing profile control. Focus/disabled assertions target the Settings menu item. No existing test cases were deleted or skipped; the behavior checks remain.
+
+The shared mocked shell now supplies detail responses for every mocked post ID, because visible cards load bodies before opening Comments. The visual spec adds expanded-feed and body-error captures, and waits for lazy bodies before full-page screenshots so capture height stays stable. `feed_polish.cy.js` adds 15 focused cases for inline behavior, request handling, observer fallbacks, keyboard access, responsive feeds, compact suggestions, settings-only logout, and actual server-sanitized rendering.
+
+Development caught and fixed React replacing the local clipped-link tab-order adjustment during rerender; keeping the HTML render prop stable preserves it. A subsequent new-test assertion-chain error was corrected without changing its checks. The single full regression passed **94/94 tests across 21 specs in 5m 21s**: **79 existing tests (including the original 45), 15 added tests, 0 failures, 0 pending, 0 skipped**. The selected existing development specs passed 59/59; the corrected new spec passed 15/15.
+
+The user requested a shorter preview while the full regression was running. That run tested the six-line version; the final implementation uses three lines. The two resize/fallback fixtures were shortened to continue exercising content that fits on desktop but overflows on mobile, and a proportional assertion verifies the three-line limit. Frontend lint and the production build passed after the final three-line clamp and fade changes. The final targeted run passed **25/25 tests in 5m 58s** (15 feed, 4 responsive, 6 visual), with **0 failures, 0 pending, 0 skipped**. No second full suite was run. The final source inventory remains **94 tests in 21 specs**, with no exclusive tests.
+
+Manual visual review completed for **114 browser captures across 19 screens/states**, at **375px, 768px, and 1280px in both light and dark themes**. Reviewed collapsed/expanded feeds, body loading errors, TopBar/Settings/logout, sidebar, human and agent profiles, Comments, editors, auth/reset, admin, long content, and empty/error states. Existing contrast and overflow checks retain their thresholds. Native keyboard activation, clipped-link tab order, focus retention, and dialog focus return passed; no separate accessibility runner exists. The local clipped-link handling covers wrapped links without DOM reconstruction; no additional keyboard refactor was needed.
+
+Logs: `cypress/logs/feed-focused.log`, `cypress/logs/feed-targeted.log`, `cypress/logs/feed-focused-retry.log`, `cypress/logs/feed-full.log`, `cypress/logs/feed-final-preview.log`, and `cypress/logs/feed-final-checks.log`.
+
 ## Post-submission follow-ups
 
 - Defer popular/most-traffic posts: existing paginated data has likes/comments but no traffic metric or complete ranking. Do not present a partial-page sort as a site-wide popularity feature.
 - Separate post-preview/detail/management responsibilities in SinglePost only with dedicated regression coverage.
 - Revisit SearchBar naming/responsibilities and comments organization as a deliberate refactor.
-- Consider route/editor code splitting for the existing large-bundle warning (follow-up entry about 881 KB minified / 269 KB gzip).
+- Consider route/editor code splitting for the existing large-bundle warning (feed-pass entry about 883 KB minified / 270 KB gzip).
 - Broaden automated accessibility checks beyond the focused keyboard, naming, contrast, and overflow checks included here.
 
 No merge or push to main is part of this pass. Concurrent edits in the main checkout are outside this branch and have been left untouched.

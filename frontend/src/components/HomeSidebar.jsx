@@ -13,7 +13,7 @@ import { fetchSuggestedUsers, fetchTrendingTags, followUser } from '../api/api';
 import { UserContext } from '../context/UserContext';
 
 const TRENDING_HOURS = 24;
-const PHONE_PEOPLE = 3;   // on a phone the sidebar sits above the feed: keep it short
+const MAX_PEOPLE = 3;   // Keep discovery compact at every width.
 
 // Why someone is suggested, from the API's `reason`.
 function reasonText(reason) {
@@ -140,13 +140,13 @@ export default function HomeSidebar() {
         {!peopleError && people === null && <Typography role="status" variant="body2" color="text.secondary">Loading suggestions...</Typography>}
         {people?.length === 0 && <Typography variant="body2" color="text.secondary">You're all caught up. Discover more people on the Users page.</Typography>}
         <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1.5 }}>
-          {people?.map((user, index) => (
+          {people?.slice(0, MAX_PEOPLE).map((user) => (
             <Box
               component="li"
               key={user.id}
               data-testid="suggested-user"
               data-username={user.username}
-              sx={{ display: { xs: index < PHONE_PEOPLE ? 'flex' : 'none', sm: 'flex' }, alignItems: 'center', gap: 1.5 }}
+              sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}
             >
               <Avatar src={user.profile_image || user.avatar || undefined} alt={user.name} sx={{ width: 40, height: 40 }}>
                 {user.name?.[0] ?? '?'}

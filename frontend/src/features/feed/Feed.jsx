@@ -87,10 +87,10 @@ function FeedContent({ username, tag, feed, manage = false, emptyMessage = 'No p
 
   return (
     <Box>
-      {/* One column on phones and tablets, two from md (900px) up. */}
+      {/* A single reading column at every width. */}
       <Grid container spacing={2}>
         {posts.map(post => (
-          <Grid key={post.id} size={{ xs: 12, md: 6 }}>
+          <Grid key={post.id} size={12}>
             <SinglePost
               post={post}
               manage={manage}

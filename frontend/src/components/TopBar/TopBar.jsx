@@ -151,11 +151,7 @@ export default function TopBar() {
               </Button>
             )}
 
-            {currentUser ? (
-              <Button data-testid="nav-logout" disabled={logoutBusy} sx={{ ...navSx, my: 1 }} onClick={() => setLogoutOpen(true)}>
-                Logout
-              </Button>
-            ) : (
+            {!currentUser && (
               <Button component={Link} to="/login" sx={{ ...navSx, my: 1 }}>
                 Login
               </Button>
@@ -207,11 +203,7 @@ export default function TopBar() {
                   <Typography sx={{ textAlign: 'center' }}>Profile</Typography>
                 </MenuItem>
               )}
-              {currentUser ? (
-                <MenuItem disabled={logoutBusy} onClick={() => { handleCloseNavMenu(); setLogoutOpen(true); }}>
-                  <Typography sx={{ textAlign: 'center' }}>Logout</Typography>
-                </MenuItem>
-              ) : (
+              {!currentUser && (
                 <MenuItem component={Link} to="/login" onClick={handleCloseNavMenu}>
                   <Typography sx={{ textAlign: 'center' }}>Login</Typography>
                 </MenuItem>

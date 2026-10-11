@@ -63,7 +63,7 @@ describe('theme settings and branding', () => {
     expectMode('dark');
     cy.get('[data-testid="post-title-input"]').should('have.value', 'Keep this draft');
     cy.get('.ql-editor').should('contain', 'Keep this body too.');
-    cy.get('[data-testid="nav-logout"]').should('be.visible');
+    cy.get('[data-testid="nav-profile"]').should('be.visible');
     cy.contains('nav a', 'About').click();
     expectMode('dark');
     cy.reload();
@@ -157,7 +157,7 @@ describe('theme settings and branding', () => {
     });
     press('Enter', 'Enter', 13);
     press('End', 'End', 35);
-    cy.focused().should('have.attr', 'data-testid', 'settings-logout');
+    cy.focused().should('have.attr', 'data-testid', 'nav-logout');
     press('Enter', 'Enter', 13);
     cy.get('[role="dialog"]').should('be.visible').and('contain', 'Log out');
     press('Escape', 'Escape', 27);
@@ -170,7 +170,7 @@ describe('theme settings and branding', () => {
     it('keeps the existing confirmation and logout contract for ' + (allDevices ? 'all devices' : 'this device'), () => {
       cy.intercept('POST', '**/api/logout', { delay: 800, body: { message: 'Logged out' } }).as('logout');
       cy.visit('/');
-      cy.get('[data-testid="nav-logout"]').should('be.visible');
+      cy.get('[data-testid="nav-profile"]').should('be.visible');
       choose('dark');
       cy.get(settings).click();
       cy.get('[data-testid="settings-logout"]').click();
@@ -179,9 +179,8 @@ describe('theme settings and branding', () => {
       cy.get(settings).should('be.focused').click();
       cy.get('[data-testid="settings-logout"]').click();
       cy.contains('[role="dialog"] button', allDevices ? 'Logout from all devices' : 'Logout from this device').click();
-      cy.get('[data-testid="nav-logout"]').should('be.disabled');
       cy.get(settings).click();
-      cy.get('[data-testid="settings-logout"]').should('have.attr', 'aria-disabled', 'true');
+      cy.get('[data-testid="nav-logout"]').should('have.attr', 'aria-disabled', 'true');
       cy.wait('@logout').its('request.body').should('deep.equal', { allDevices });
       cy.get('@logout.all').should('have.length', 1);
       cy.get('[data-testid="nav-logout"]').should('not.exist');

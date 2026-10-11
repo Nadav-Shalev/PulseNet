@@ -1,5 +1,5 @@
 // Every page fits a 375px phone (iPhone X) without sideways scrolling, and the
-// feed switches from one column on phones to two on wide screens.
+// feed remains one column on phones and wide screens.
 const LONG_WORD = 'averyveryverylongunbrokenwordthatcouldwidenthecardpastthescreen'
 
 // The page is no wider than the window (clientWidth excludes a vertical scrollbar).
@@ -61,7 +61,7 @@ describe('responsive layout', () => {
     })
   })
 
-  it('the feed is one column on a phone and two on a desktop', () => {
+  it('the feed remains one column on a phone and desktop', () => {
     // should() retries until the layout settles, so a late re-render is not a failure.
     cy.viewport('iphone-x')
     cy.visit(`/user-posts/${author.username}`)
@@ -70,7 +70,7 @@ describe('responsive layout', () => {
 
     cy.viewport(1280, 800)
     cy.get('[data-testid="post-card"]')
-      .should(([first, second]) => expect(left(second), 'side by side').to.be.greaterThan(left(first)))
+      .should(([first, second]) => expect(left(second), 'stacked desktop cards').to.equal(left(first)))
   })
 
   it('on a phone the profile header stacks and a post opens full screen', () => {
@@ -84,7 +84,7 @@ describe('responsive layout', () => {
       })
     })
 
-    cy.contains('[data-testid="post-card"]', 'Phone check').contains('button', 'Read More').click()
+    cy.contains('[data-testid="post-card"]', 'Phone check').find('[data-testid="comment-button"]').click()
     cy.get('[data-testid="post-dialog"] .MuiDialog-paper').should(([paper]) => {
       expect(paper.getBoundingClientRect().width, 'dialog width').to.equal(375)
     })

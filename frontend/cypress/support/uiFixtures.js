@@ -12,7 +12,9 @@ export function mockShell(me = null) {
   cy.intercept('GET', '**/api/tags/trending*', []);
   cy.intercept('GET', '**/api/users/suggested*', []);
   cy.intercept({ method: 'GET', pathname: '/api/articles' }, [article(1)]);
-  cy.intercept('GET', '**/api/articles/1', article(1));
+  cy.intercept({ method: 'GET', pathname: /^\/api\/articles\/\d+$/ }, req => {
+    req.reply(article(Number(req.url.split('/').pop())));
+  });
   cy.intercept('GET', '**/api/articles/1/comments', []);
 }
 export function themeVisit(path, dark) {

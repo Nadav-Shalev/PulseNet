@@ -28,12 +28,12 @@ describe('keyboard accessibility', () => {
     cy.get('[aria-label="Open navigation menu"]').should('be.focused');
     press('Tab', 'Tab', 9);
     cy.focused().should('have.attr', 'role', 'tab').and('contain', 'Global');
-    cy.contains('button', 'Read More').focus();
+    cy.get('[data-testid="comment-button"]').first().focus();
     press('Enter', 'Enter', 13);
     cy.get('[role="dialog"]').should('be.visible').and('have.attr', 'aria-labelledby');
     press('Escape', 'Escape', 27);
-    cy.contains('button', 'Read More').should('be.focused');
-    cy.contains('button', 'Read More').should(button => {
+    cy.get('[data-testid="comment-button"]').first().should('be.focused');
+    cy.get('[data-testid="comment-button"]').first().should(button => {
       expect(button[0].ownerDocument.defaultView.getComputedStyle(button[0]).outlineStyle).not.to.equal('none');
     });
   });

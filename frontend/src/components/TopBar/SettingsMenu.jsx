@@ -74,12 +74,12 @@ export default function SettingsMenu({ canLogout, logoutBusy, onLogout }) {
         ))}
         {canLogout && <Divider />}
         {canLogout && (
-          <MenuItem data-testid="settings-logout" disabled={logoutBusy} onClick={() => {
+          <MenuItem data-testid="nav-logout" disabled={logoutBusy} onClick={() => {
             logoutAfterClose.current = true;
             setAnchor(null);
           }}>
             <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Logout</ListItemText>
+            <ListItemText data-testid="settings-logout">Logout</ListItemText>
           </MenuItem>
         )}
       </Menu>

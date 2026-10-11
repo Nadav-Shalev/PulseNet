@@ -46,7 +46,18 @@ describe('polish visual and accessibility checks', () => {
       it('renders key screens at ' + width + 'px in ' + (dark ? 'dark' : 'light') + ' mode', () => {
         const mode = dark ? 'dark' : 'light';
         const shot = name => {
-          // Capture settled content, after requests and click ripples complete.
+          // Visit lazy bodies before a full-page capture so loading cannot change
+          // the document height midway through the screenshot.
+          cy.get('body').then(page => {
+            if (page.find('[data-testid="post-card"]').length) {
+              cy.get('[data-testid="post-card"]').each(post => {
+                cy.wrap(post).scrollIntoView().find('[data-testid="post-body"]').should(section => {
+                  expect(section.find('.rich-text,[role="alert"]').length, 'body settled').to.be.greaterThan(0);
+                });
+              });
+              cy.scrollTo(0, 0, { ensureScrollable: false });
+            }
+          });
           cy.get('[role="progressbar"]:visible,.MuiTouchRipple-childLeaving').should('not.exist');
           noOverflow();
           readableText();
@@ -57,6 +68,7 @@ describe('polish visual and accessibility checks', () => {
         cy.intercept({ method: 'GET', pathname: '/api/articles' }, [article(1, 'Building thoughtful interfaces'), article(2, longWord)]);
         cy.intercept('GET', '**/api/tags/trending*', [{ name: 'react', post_count: 4 }, { name: 'accessibility', post_count: 3 }]);
         cy.intercept('GET', '**/api/users/suggested*', [{ ...person(2), name: 'Maya Chen' }, { ...person(3), name: 'Nova', is_agent: true }]);
+        cy.intercept('GET', '**/api/articles/1', { ...article(1), body_html: '<p>Readable content with <strong>clear emphasis</strong> and <a href="/about">useful context</a>.</p>' + '<p>A practical conversation about thoughtful software and accessible interfaces.</p>'.repeat(8) + '<pre><code>' + longWord + '</code></pre>' });
         cy.intercept('GET', '**/api/articles/1/comments', [comment]);
         cy.intercept('GET', '**/api/users/person2', { ...person(2), name: 'Maya Chen', bio: 'Frontend engineer. ' + longWord, followers_count: 12, following_count: 5 });
         cy.intercept('GET', '**/api/users/nova_ai', { ...person(4), username: 'nova_ai', name: 'Nova', bio: 'Curious about thoughtful software.', is_agent: true, personality: 'I explore how people build useful, accessible software. I share practical examples, ask clear questions, and enjoy discussing React, design, and the web.\n\nI explain tradeoffs in plain language and welcome different approaches.' });
@@ -67,7 +79,11 @@ describe('polish visual and accessibility checks', () => {
         cy.get('[data-testid="post-card"]').should('have.length', 2);
         cy.get('[data-testid="suggested-user"]').should('have.length', 2);
         cy.document().should(doc => expect(doc.defaultView.getComputedStyle(doc.documentElement).colorScheme).to.equal(mode));
+        cy.get('[data-testid="post-body"]').first().contains('button', 'Read More').should('be.visible');
         shot('home');
+        cy.get('[data-testid="post-body-toggle"]').first().click();
+        shot('home-expanded');
+        cy.get('[data-testid="post-body-toggle"]').first().click();
         cy.get('[data-testid="nav-settings"]').click();
         cy.get('[role="menu"][aria-label="Settings"]').should('be.visible');
         cy.get('#settings-menu .MuiPaper-root').should('have.css', 'opacity', '1');
@@ -78,7 +94,7 @@ describe('polish visual and accessibility checks', () => {
         cy.screenshot(mode + '-' + width + '-logout', { capture: 'viewport', overwrite: true });
         cy.contains('[role="dialog"] button', 'Cancel').click();
         cy.get('[role="dialog"]').should('not.exist');
-        cy.contains('[data-testid="post-card"]', 'Building thoughtful').contains('button', 'Read More').click();
+        cy.contains('[data-testid="post-card"]', 'Building thoughtful').find('[data-testid="comment-button"]').click();
         cy.get('[data-testid="comment"]').should('exist');
         noOverflow();
         readableText();
@@ -131,6 +147,11 @@ describe('polish visual and accessibility checks', () => {
         cy.get('[data-testid="admin-tab-users"]').click();
         cy.get('[data-testid="admin-user-row"]').should('have.length', 2);
         shot('admin-users');
+
+        cy.intercept('GET', '**/api/articles/1', { statusCode: 503, body: { error: 'Post body unavailable. Please retry.' } });
+        themeVisit('/', dark);
+        cy.get('[data-testid="post-body"]').first().should('contain', 'Post body unavailable.');
+        shot('body-error');
 
         cy.intercept({ method: 'GET', pathname: '/api/articles' }, []);
         themeVisit('/', dark);

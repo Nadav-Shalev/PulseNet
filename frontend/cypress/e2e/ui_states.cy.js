@@ -61,10 +61,12 @@ describe('frontend request recovery', () => {
     cy.intercept('GET', '**/api/articles/1', req => req.reply(++calls === 1
       ? { statusCode: 503, body: { error: 'Post unavailable' } } : { body: article(1) }));
     cy.visit('/');
-    cy.contains('button', 'Read More').click();
-    cy.contains('Post unavailable').should('be.visible');
-    cy.get('[aria-label="Loading post"]').should('not.exist');
-    cy.contains('button', 'Retry').click();
+    cy.get('[data-testid="comment-button"]').first().click();
+    cy.get('[data-testid="post-dialog"]').within(() => {
+      cy.contains('Post unavailable').should('be.visible');
+      cy.get('[aria-label="Loading post"]').should('not.exist');
+      cy.contains('button', 'Retry').click();
+    });
     cy.get('[data-testid="post-dialog"]').should('contain', 'A better developer experience');
     cy.then(() => expect(calls).to.equal(2));
   });

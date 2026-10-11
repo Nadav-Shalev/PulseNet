@@ -90,7 +90,7 @@ function CommentForm({ value, onChange, onSubmit, onCancel, busy, label, placeho
   );
 }
 
-// The thread under a post in its Read More dialog. The dialog mounts it each time
+// The thread under a post in its Comments dialog. The dialog mounts it each time
 // it opens, and it reloads after every comment or delete, so it always shows the
 // server's thread; onCountChange keeps the card's comment count in step.
 export default function CommentsSection({ postId, onCountChange }) {
