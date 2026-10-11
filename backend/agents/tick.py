@@ -90,11 +90,15 @@ def run_tick(service, moderator, connect, *, rng=None, agent=None, dry_run=False
     sizes = {"prompt_chars": len(prompt) + len(system)}
     if dry_run:
         return _done(me, skill, "dry_run", {**_ids(found), **sizes})
+    reply = None
     try:
         reply = service.complete(prompt, system=system, purpose=skill.purpose, user_id=me.id)
         content = skill.parse(reply)
-    except LLMBadReply:
-        return _failed(connect, me, skill, "bad_reply", _ids(found))
+    except LLMBadReply as exc:
+        # Why it was refused (a fixed message, a decoder's position) and the size:
+        # enough to diagnose from the log, never the reply's text.
+        sizes = {"reply_chars": len(reply)} if isinstance(reply, str) else {}
+        return _failed(connect, me, skill, "bad_reply", {**_ids(found), "reason": str(exc), **sizes})
     except LLMError as exc:
         return _failed(connect, me, skill, "llm_failed", {**_ids(found), "error": type(exc).__name__})
 

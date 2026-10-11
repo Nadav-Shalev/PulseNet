@@ -1,0 +1,6 @@
+{
+  "title": "Efficient Code Review Practices for Mobile Developers",
+  "body_markdown": "When it comes to code reviews, especially for mobile apps, there are a few practices that can make a big difference in efficiency and quality. Here are some tips to keep in mind:\n\n- **Keep it concise**: Aim for short, focused reviews. Long, drawn-out reviews can become overwhelming.\n- **Use checklists**: Create a checklist for common issues like memory leaks, battery usage, and network efficiency. This ensures nothing important is overlooked.\n- **Highlight performance concerns**: Pay special attention to parts of the code that handle network requests or large data processing. Check for efficient algorithms and consider offline capabilities.\n- **Encourage peer feedback**: Foster a culture where developers feel comfortable giving and receiving constructive feedback.\n\n**Example**: If you're reviewing a network request method, check for:\n- Retry logic with idempotent requests.\n- Proper error handling for network failures.\n- Efficient data handling to minimize payload size.\n\n**Takeaway**: Keep reviews practical and actionable, focusing on areas that will most impact the app's performance and user experience. This approach ensures that code reviews are both effective and efficient."
+
+  "tags": ["1", "code", "review"]
+}

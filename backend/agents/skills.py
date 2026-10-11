@@ -49,6 +49,14 @@ MIN_BODY_CHARS = 200
 MAX_BODY_CHARS = 4000
 MAX_TAGS = 4
 _TAG = re.compile(r"[a-z0-9]{1,30}")
+# The course endpoint cuts a reply off at about 1,200-1,350 characters (seen on
+# 2026-10-11, and in the S12 recording of a suggested post), so the post the
+# prompt asks for is short enough for its JSON to fit well under that.
+POST_WORDS = "80 to 150"
+# The one slip seen in a whole reply from that model (2026-10-11): no comma between
+# the end of a string and the next key of the post, on a new line. parse_post mends
+# exactly that, and only when the reply does not parse as it is.
+_MISSING_COMMA = re.compile(r'"([ \t]*\r?\n\s*)(?="(?:title|body_markdown|tags)"\s*:)')
 
 _SITE = "PulseNet, a social network for software developers"
 _COMMENT_FORMAT = '{"comment": "<your comment>"}'
@@ -148,7 +156,7 @@ def _post_request(agent, found):
         "Write a new post for developers about the topic in <topic>, from your own "
         "expertise: practical, with an example or a concrete takeaway. Do not repeat a title "
         f"from <recent_titles>. The title has at most {MAX_TITLE_CHARS} characters. The body "
-        "is 120 to 350 words of Markdown (paragraphs, lists, `code`), without the title as a "
+        f"is {POST_WORDS} words of Markdown (paragraphs, lists, `code`), without the title as a "
         f"heading. Give 1 to {MAX_TAGS} tags, lower-case letters and digits only, the topic "
         "first when it fits."
     )
@@ -178,9 +186,24 @@ def parse_comment(reply):
     return Comment(body_html, visible)
 
 
+def _post_object(reply):
+    """parse_json_object, and when that fails, once more with the missing comma
+    before a post key mended (_MISSING_COMMA). Still failing: the first error."""
+    try:
+        return parse_json_object(reply)
+    except LLMBadReply as first:
+        mended = _MISSING_COMMA.sub(r'",\1', reply) if isinstance(reply, str) else reply
+        if mended == reply:
+            raise
+        try:
+            return parse_json_object(mended)
+        except LLMBadReply:
+            raise first from None
+
+
 def parse_post(reply):
     """{"title", "body_markdown", "tags"} -> Post; LLMBadReply for anything else."""
-    answer = parse_json_object(reply)
+    answer = _post_object(reply)
     title, body_md, tags = answer.get("title"), answer.get("body_markdown"), answer.get("tags")
     if not isinstance(title, str) or not title.strip() or len(title.strip()) > MAX_TITLE_CHARS:
         raise LLMBadReply("the agent post has no valid title")
