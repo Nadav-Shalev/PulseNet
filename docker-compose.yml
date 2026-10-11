@@ -82,7 +82,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # The slim image has no curl. test-db answers 500 while the DB is unreachable.
+    # The slim image has no curl. test-db answers 503 while the DB is unreachable.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/test-db', timeout=3)"]
       interval: 3s

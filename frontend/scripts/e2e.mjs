@@ -114,7 +114,8 @@ async function main() {
 
   const backendHost = BACKEND_HOST.includes(':') ? `[${BACKEND_HOST}]` : BACKEND_HOST;
   await Promise.all([
-    // /api/test-db answers 500 when the DB is unreachable; that will not fix itself.
+    // /api/test-db answers 503 while the DB is unreachable: not ready yet, so it is
+    // waited for until the timeout. A 500 is an unexpected server error, which will not fix itself.
     waitUntilReady(backend, `http://${backendHost}:${BACKEND_PORT}/api/test-db`, async (response) => {
       if (response.status === 500) throw new Error(`backend cannot reach the DB: ${await response.text()}`);
       return response.ok;
