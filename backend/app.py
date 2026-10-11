@@ -192,6 +192,27 @@ SESSION_COOKIE_NAME    = "session_id"
 SESSION_DURATION_DAYS  = 7
 SESSION_MAX_AGE_SECONDS = SESSION_DURATION_DAYS * 24 * 60 * 60  # 604800
 
+_COOKIE_SECURE_ON  = ("1", "true", "yes", "on")
+_COOKIE_SECURE_OFF = ("", "0", "false", "no", "off")
+
+
+def _cookie_secure(env):
+    """SESSION_COOKIE_SECURE: on only where the site is served over HTTPS (the
+    EC2), so the browser never sends the session cookie over plain HTTP. Off (the
+    default) for local HTTP development, Docker and the E2E run. Any other value
+    stops the server from starting, naming the variable: a typo must not quietly
+    turn the flag off."""
+    raw = (env.get("SESSION_COOKIE_SECURE") or "").strip().lower()
+    if raw in _COOKIE_SECURE_ON:
+        return True
+    if raw in _COOKIE_SECURE_OFF:
+        return False
+    raise ValueError("SESSION_COOKIE_SECURE must be one of: "
+                     f"{', '.join(_COOKIE_SECURE_ON + _COOKIE_SECURE_OFF[1:])} (or empty)")
+
+
+SESSION_COOKIE_SECURE = _cookie_secure(os.environ)
+
 
 def _user_shape(row):
     """The logged-in user's own record (/api/me, login, signup). It is the only
@@ -310,22 +331,21 @@ def _create_session(cursor, user_id):
 
 
 def _set_session_cookie(resp, session_id):
-    # No Secure flag yet: the site is served over plain HTTP (dev and the EC2).
-    # Adding it with HTTPS is the final-production hardening in backend/README.md
-    # ("Security Notes").
+    # Secure follows SESSION_COOKIE_SECURE (on in production, over HTTPS).
     resp.set_cookie(
         SESSION_COOKIE_NAME, session_id,
         max_age=SESSION_MAX_AGE_SECONDS,
-        httponly=True, samesite="Lax", path="/",
+        httponly=True, samesite="Lax", path="/", secure=SESSION_COOKIE_SECURE,
     )
     return resp
 
 
 def _clear_session_cookie(resp):
+    # The same attributes as when it was set, so the browser replaces that cookie.
     resp.set_cookie(
         SESSION_COOKIE_NAME, "",
         max_age=0,
-        httponly=True, samesite="Lax", path="/",
+        httponly=True, samesite="Lax", path="/", secure=SESSION_COOKIE_SECURE,
     )
     return resp
 

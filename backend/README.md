@@ -418,9 +418,9 @@ Mail goes through `mailer.py`, set by `MAIL_PROVIDER` (unset = mail off, and
 | `SMTP_TIMEOUT_SECONDS` | `smtp`: 1 to 30 | `10` |
 | `APP_BASE_URL` | the site's public address, for the links | required with `smtp`; `http://localhost:5173` with `file` |
 
-On the EC2 the site is `http://<IP>:8080` and the IP changes when the instance is
-stopped and started, so `APP_BASE_URL` is updated with it. Check the whole path with
-one real mail, from the project root:
+On the EC2 `APP_BASE_URL` is `https://app.pulsenet-services.com`, so a reset link
+only travels over HTTPS. Check the whole path with one real mail, from the project
+root:
 
 ```bash
 python backend/manage.py mail-check --to you@example.com
@@ -496,11 +496,13 @@ the course model blocks a comment that quotes a threat in order to condemn it.
   printed or stored, and are kept out of error messages.
 - Password-reset tokens are stored only as SHA-256 hashes, work once, and expire
   after 30 minutes (see "Password Reset").
-- **Still to do for the final production deployment: HTTPS and a `Secure` session
-  cookie.** The live site is served over plain HTTP (`http://<IP>:8080`), so the
-  `session_id` cookie is sent without the `Secure` attribute, and a password-reset
-  link crosses the network in clear text when it is opened. The hardening is: TLS in
-  nginx (a domain and a certificate, e.g. Let's Encrypt), `APP_BASE_URL` with
-  `https://`, and `secure=True` in `_set_session_cookie` and `_clear_session_cookie`
-  (for example behind a `SESSION_COOKIE_SECURE` setting, so local HTTP development
-  keeps working). Until then, the cookie is still `HttpOnly` and `SameSite=Lax`.
+- The session cookie is `HttpOnly` and `SameSite=Lax` everywhere, and `Secure` in
+  production: `SESSION_COOKIE_SECURE=1` sets it in `_set_session_cookie` and
+  `_clear_session_cookie`. It is off by default, so local HTTP development, Docker
+  and the E2E run keep working. A value other than on/off stops the server from
+  starting, so a typo cannot quietly drop the flag.
+- Production is served only over HTTPS (`https://app.pulsenet-services.com`): nginx
+  terminates TLS 1.2/1.3 with a Let's Encrypt certificate, redirects plain HTTP (port
+  80 and the old `:8080` address) to it, and adds HSTS and a few security headers
+  (`deploy/nginx/pulsenet.conf`). `APP_BASE_URL` is that address, so password-reset
+  links use HTTPS too.

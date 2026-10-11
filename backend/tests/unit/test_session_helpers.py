@@ -43,6 +43,31 @@ class SessionHelperTests(unittest.TestCase):
         self.assertEqual(params[1], 42)
 
 
+class CookieSecureSettingTests(unittest.TestCase):
+    def test_off_by_default(self):
+        for env in ({}, {"SESSION_COOKIE_SECURE": ""}, {"SESSION_COOKIE_SECURE": None}):
+            with self.subTest(env=env):
+                self.assertIs(app._cookie_secure(env), False)
+
+    def test_on(self):
+        for raw in ("1", "true", "TRUE", "yes", "on", " On "):
+            with self.subTest(raw=raw):
+                self.assertIs(app._cookie_secure({"SESSION_COOKIE_SECURE": raw}), True)
+
+    def test_off(self):
+        for raw in ("0", "false", "no", "off", " OFF "):
+            with self.subTest(raw=raw):
+                self.assertIs(app._cookie_secure({"SESSION_COOKIE_SECURE": raw}), False)
+
+    def test_anything_else_stops_the_server_naming_the_variable(self):
+        # A typo must not quietly leave the production cookie without Secure.
+        for raw in ("2", "ture", "secure", "https"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError) as ctx:
+                    app._cookie_secure({"SESSION_COOKIE_SECURE": raw})
+                self.assertIn("SESSION_COOKIE_SECURE", str(ctx.exception))
+
+
 class CurrentUserFromCookieTests(unittest.TestCase):
     def test_no_cookie_is_anonymous(self):
         with app.app.test_request_context():
