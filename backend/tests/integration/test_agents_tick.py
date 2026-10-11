@@ -117,19 +117,31 @@ class ReplyTests(TickTestCase):
 
 class CommentAndPostTests(TickTestCase):
     def test_a_comment_on_a_trending_post_starts_a_thread(self):
-        found = {"post_id": 9, "post_title": "CSS grid", "post_body": "Grid is...", "post_author": "ada",
-                 "interest_hit": 1}
+        stale = {**TRENDING_POST, "post_id": 8, "age_minutes": 40 * 60}
         # Not due to post (posted just now), so it goes on to the trending search.
-        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}]],
-                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}, found]))
+        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}], [stale, TRENDING_POST]],
+                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}]))
         self.llm(COMMENT, CLEAN)
 
         result = self.tick(connect)
 
         self.assertEqual((result.skill, result.outcome), ("comment_trending", "commented"))
-        self.assertEqual(result.detail, {"post_id": 9, "comment_id": 90})
+        self.assertEqual(result.detail, {"post_id": 9, "comment_id": 90})      # the fresher one
         self.assertIsNone(self.write.params_for("insert into comments")[2])     # top-level
-        self.assertEqual(self.purposes()[0][0], "agent_comment")
+        # Choosing the post took no LLM call: one to write, one to moderate.
+        self.assertEqual(self.purposes(), [("agent_comment", 131, "ok"), ("moderation", 131, "ok")])
+        self.assertIn("<post_title>\nCSS grid\n</post_title>", self.service.provider.calls[0][0])
+
+    def test_a_dry_run_shows_the_post_it_would_comment_on_with_no_call(self):
+        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}], [TRENDING_POST]],
+                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}]))
+        self.llm()
+
+        result = self.tick(connect, dry_run=True)
+
+        self.assertEqual((result.skill, result.outcome, result.detail["post_id"]),
+                         ("comment_trending", "dry_run", 9))
+        self.assertEqual((self.service.provider.calls, self.opened), ([], 1))
 
     def test_a_first_post_with_its_tags(self):
         read = FakeConn(fetchall=[[AGENT_ROW], [], []],
@@ -172,11 +184,39 @@ class CommentAndPostTests(TickTestCase):
                          "Efficient Code Review Practices for Mobile Developers")
         self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
 
+    def test_a_post_tagged_with_numbers_is_stored_with_its_hashtags(self):
+        # Production post 38 (2026-10-11), reconstructed: "tags" ["1", "3", "5"] and a
+        # body that ends in "#rust #beginners #performance #memoryefficiency". It was
+        # stored with the tags 1, 3, 5 and that line as an <h1>.
+        reply = (TESTS_DIR / "fixtures" / "agent_replies" / "course" / "post_38_reconstructed.json").read_text(
+            encoding="utf-8")
+        read = FakeConn(fetchall=[[AGENT_ROW], [], []],
+                        fetchone=[None, None, {"last_post": None, "now": NOW}])
+        write = FakeConn(fetchone=[(61,), (68,), (62,), (87,)], lastrowid=77)
+        connect = self.connections(read, write)
+        self.llm(reply, CLEAN)
+
+        result = self.tick(connect)
+
+        self.assertEqual((result.skill, result.outcome), ("write_post", "posted"))
+        self.assertEqual([p for _, p in write.find("insert ignore into tags")],
+                         [("rust",), ("beginners",), ("performance",), ("memoryefficiency",)])
+        self.assertEqual([p for _, p in write.find("insert ignore into posts_tags")],
+                         [(77, 61), (77, 68), (77, 62), (77, 87)])
+        body_html = write.find("insert into posts")[0][1][3]
+        self.assertNotIn("<h1>", body_html)
+        self.assertTrue(body_html.endswith("<p>#rust #beginners #performance #memoryefficiency</p>"))
+        # Moderated with the tags it is stored with, and still one call each.
+        self.assertIn("<post_tags>\nrust, beginners, performance, memoryefficiency\n</post_tags>",
+                      self.service.provider.calls[1][0])
+        self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
+
 
 class LikeFollowTests(TickTestCase):
     def test_follow_needs_no_llm(self):
-        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [], [{"author_id": 3}]],
-                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}, None]))
+        # No trending tag and no post to comment on, then an author to follow.
+        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [], [], [{"author_id": 3}]],
+                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}]))
         self.llm()
 
         result = self.tick(connect)
@@ -191,7 +231,7 @@ class LikeFollowTests(TickTestCase):
         # Something waits for every LLM skill, but with the LLM off their triggers do
         # not even run: the next read after the agent list is like_or_follow's.
         read = FakeConn(fetchall=[[AGENT_ROW], [], [{"id": 12}]],
-                        fetchone=[_waiting(), _waiting(), {"post_id": 9}, {"last_post": None, "now": NOW}])
+                        fetchone=[_waiting(), _waiting(), {"last_post": None, "now": NOW}])
         connect = self.connections(read)
 
         result = self.tick(connect, service=None)
@@ -336,7 +376,7 @@ class AgentChoiceTests(TickTestCase):
 
     def test_idle_when_nothing_is_found(self):
         connect = self.connections(FakeConn(fetchall=[[AGENT_ROW]],
-                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}, None]))
+                                            fetchone=[None, None, {"last_post": NOW, "now": NOW}]))
         self.llm()
 
         result = self.tick(connect)
@@ -492,7 +532,7 @@ class LogTests(TickTestCase):
 
 
 TRENDING_POST = {"post_id": 9, "post_title": "CSS grid", "post_body": "Grid is...", "post_author": "ada",
-                 "interest_hit": 1, "agent_comments": 0}
+                 "interest_hit": 1, "age_minutes": 90, "likes": 2, "human_comments": 1, "agent_comments": 0}
 
 
 class PolicyTests(TickTestCase):
@@ -503,9 +543,8 @@ class PolicyTests(TickTestCase):
 
     def test_a_due_agent_posts_even_when_a_trending_post_waits(self):
         # Last post 25 hours ago, and a trending post to comment on is queued too.
-        read = FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}], []],
-                        fetchone=[None, None, {"last_post": NOW - timedelta(hours=25), "now": NOW},
-                                  TRENDING_POST])
+        read = FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}], [], [TRENDING_POST]],
+                        fetchone=[None, None, {"last_post": NOW - timedelta(hours=25), "now": NOW}])
         connect = self.connections(read, FakeConn(fetchone=[(5,), (6,)], lastrowid=77))
         self.llm(POST, CLEAN)
 
@@ -532,9 +571,8 @@ class PolicyTests(TickTestCase):
     def test_a_recent_post_waits_for_the_interval(self):
         for hours in (1, 23):
             with self.subTest(hours=hours):
-                read = FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}]],
-                                fetchone=[None, None, {"last_post": NOW - timedelta(hours=hours), "now": NOW},
-                                          TRENDING_POST])
+                read = FakeConn(fetchall=[[AGENT_ROW], [{"name": "css"}], [TRENDING_POST]],
+                                fetchone=[None, None, {"last_post": NOW - timedelta(hours=hours), "now": NOW}])
                 connect = self.connections(read)
                 self.llm(COMMENT, CLEAN)
 
@@ -547,8 +585,8 @@ class PolicyTests(TickTestCase):
     def test_after_a_comment_turn_the_agent_likes_or_follows(self):
         # Both a post to comment on and a post to like are there.
         after_comment = {**AGENT_ROW, "last_skill": "comment_trending"}
-        read = FakeConn(fetchall=[[after_comment], [], [{"id": 12}], [{"name": "css"}]],
-                        fetchone=[None, None, {"last_post": NOW, "now": NOW}, TRENDING_POST])
+        read = FakeConn(fetchall=[[after_comment], [], [{"id": 12}], [{"name": "css"}], [TRENDING_POST]],
+                        fetchone=[None, None, {"last_post": NOW, "now": NOW}])
         connect = self.connections(read)
         self.llm()
 
@@ -560,8 +598,8 @@ class PolicyTests(TickTestCase):
 
     def test_after_a_like_or_follow_turn_the_agent_comments(self):
         after_like = {**AGENT_ROW, "last_skill": "like_or_follow"}
-        read = FakeConn(fetchall=[[after_like], [{"name": "css"}], [], [{"id": 12}]],
-                        fetchone=[None, None, {"last_post": NOW, "now": NOW}, TRENDING_POST])
+        read = FakeConn(fetchall=[[after_like], [{"name": "css"}], [TRENDING_POST], [], [{"id": 12}]],
+                        fetchone=[None, None, {"last_post": NOW, "now": NOW}])
         connect = self.connections(read)
         self.llm(COMMENT, CLEAN)
 
@@ -571,8 +609,8 @@ class PolicyTests(TickTestCase):
 
     def test_with_nothing_to_like_after_a_comment_it_comments_again(self):
         after_comment = {**AGENT_ROW, "last_skill": "comment_trending"}
-        read = FakeConn(fetchall=[[after_comment], [], [], [{"name": "css"}]],
-                        fetchone=[None, None, {"last_post": NOW, "now": NOW}, TRENDING_POST])
+        read = FakeConn(fetchall=[[after_comment], [], [], [{"name": "css"}], [TRENDING_POST]],
+                        fetchone=[None, None, {"last_post": NOW, "now": NOW}])
         connect = self.connections(read)
         self.llm(COMMENT, CLEAN)
 
@@ -613,7 +651,7 @@ class World:
 
     def patches(self):
         names = ("list_agents", "actions_today", "record_action", "waiting_comment", "trending_tags",
-                 "post_to_comment", "last_post", "recent_titles", "posts_to_like", "authors_to_follow",
+                 "posts_to_comment", "last_post", "recent_titles", "posts_to_like", "authors_to_follow",
                  "insert_post", "insert_comment", "like", "follow")
         return [patch.object(store, name, getattr(self, name)) for name in names]
 
@@ -636,8 +674,8 @@ class World:
     def trending_tags(self, _cursor):
         return ["css"]
 
-    def post_to_comment(self, _cursor, _agent_id, _topics, _interests):
-        return TRENDING_POST
+    def posts_to_comment(self, _cursor, _agent_id, _topics, _interests):
+        return [TRENDING_POST]
 
     def last_post(self, _cursor, agent_id):
         return self.last_posts.get(agent_id), self.now

@@ -179,6 +179,17 @@ class CreateArticleStorageTests(unittest.TestCase):
         )
         self.assertGreaterEqual(conn.commits, 2)   # session cleanup + the post
 
+    def test_a_persons_tags_keep_the_api_rules(self):
+        # Only the agents drop numbers and list markers (agents.skills.tag_name).
+        conn = FakeConn(fetchone=[_session_user(), (3,), (4,), (5,)], lastrowid=7)
+        with patch_db(conn):
+            resp = _authed_client().post("/api/articles", json={"article": {
+                "title": "T", "body_html": "<p>hi</p>", "tags": ["1", "3b", "#Rust"],
+            }})
+
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.get_json()["tag_list"], ["1", "3b", "#Rust"])
+
 
 class DeleteArticleTests(unittest.TestCase):
     def test_delete_requires_session(self):
