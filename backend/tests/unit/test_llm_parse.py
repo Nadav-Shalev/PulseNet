@@ -50,6 +50,28 @@ class ParseJsonObjectTests(unittest.TestCase):
                 with self.assertRaisesRegex(LLMBadReply, "no JSON object"):
                     parse_json_object(reply)
 
+    def test_the_reason_is_the_decoders_message_and_position_never_the_text(self):
+        cases = {
+            '{"a": "SECRET-ish words" "b": 2}': r"\(Expecting ',' delimiter: line 1 column 26 \(char 25\)\)",
+            '{"a": "cut off here': r"\(Unterminated string starting at: line 1 column 7 \(char 6\)\)",
+        }
+        for reply, reason in cases.items():
+            with self.subTest(reply=reply):
+                with self.assertRaisesRegex(LLMBadReply, "no JSON object " + reason) as ctx:
+                    parse_json_object(reply)
+                self.assertNotIn("words", str(ctx.exception))
+                self.assertNotIn("cut off", str(ctx.exception))
+
+    def test_no_brace_at_all_has_no_reason(self):
+        with self.assertRaises(LLMBadReply) as ctx:
+            parse_json_object("Sure, here is my reply!")
+        self.assertEqual(str(ctx.exception), "the reply has no JSON object")
+
+    def test_the_reason_is_the_first_broken_object(self):
+        # The fenced text is tried first; its error is the one reported.
+        with self.assertRaisesRegex(LLMBadReply, r"\(Expecting value: line 1 column 7 \(char 6\)\)$"):
+            parse_json_object('```json\n{"a": }\n```\nand {"b": ')
+
     def test_a_list_holding_an_object_yields_the_object(self):
         # The first '{' starts a valid object; the list around it is not the answer.
         self.assertEqual(parse_json_object('[{"a": 1}]'), {"a": 1})

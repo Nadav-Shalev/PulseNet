@@ -16,7 +16,7 @@ for _p in (BACKEND_DIR, TESTS_DIR, HERE):
 
 from agents import SKILLS, skills, store  # noqa: E402
 from agents.store import Agent  # noqa: E402
-from llm import LLMBadReply  # noqa: E402
+from llm import LLMBadReply, parse_json_object  # noqa: E402
 from support import FakeConn  # noqa: E402
 
 COMMENT_TRENDING = skills.SKILLS_BY_NAME["comment_trending"]
@@ -203,6 +203,70 @@ class ParsePostTests(unittest.TestCase):
             with self.subTest(name):
                 with self.assertRaises(LLMBadReply):
                     skills.parse_post(reply)
+
+
+# Two replies of the course endpoint to the production write_post prompt (S18,
+# 2026-10-11), byte for byte: the first misses the comma before "tags", the second
+# was cut off before the end of its JSON.
+COURSE_REPLIES = TESTS_DIR / "fixtures" / "agent_replies" / "course"
+
+
+def _course_reply(name):
+    return (COURSE_REPLIES / name).read_text(encoding="utf-8")
+
+
+class CourseReplyTests(unittest.TestCase):
+    def test_the_reply_missing_a_comma_before_tags_is_mended(self):
+        reply = _course_reply("post_missing_comma.txt")
+        with self.assertRaisesRegex(LLMBadReply, "Expecting ',' delimiter"):
+            parse_json_object(reply)                         # as it came, it does not parse
+
+        post = skills.parse_post(reply)
+
+        self.assertEqual(post.title, "Efficient Code Review Practices for Mobile Developers")
+        self.assertEqual(post.tags, ("1", "code", "review"))
+        self.assertTrue(post.body.startswith("When it comes to code reviews"))
+        self.assertIn("<strong>Takeaway</strong>", post.body_html)
+
+    def test_a_reply_cut_off_stays_bad_and_says_why(self):
+        with self.assertRaisesRegex(LLMBadReply, r"no JSON object \(Unterminated string starting at: line 3 column 20 \(char 92\)\)"):
+            skills.parse_post(_course_reply("post_cut_off.txt"))
+
+    def test_the_mend_is_only_a_missing_comma_before_a_post_key_on_a_new_line(self):
+        body = "Use **grid**. " * 30
+        still_bad = {
+            "before another key": '{"title": "T"\n  "extra": 1, "body_markdown": "%s", "tags": ["css"]}' % body,
+            "on the same line": '{"title": "T" "body_markdown": "%s", "tags": ["css"]}' % body,
+            "after a number": '{"title": "T", "n": 5\n  "body_markdown": "%s", "tags": ["css"]}' % body,
+        }
+        for name, reply in still_bad.items():
+            with self.subTest(name), self.assertRaises(LLMBadReply):
+                skills.parse_post(reply)
+
+    def test_when_the_mend_does_not_help_the_first_error_is_the_reason(self):
+        # A missing comma before "tags" AND cut off: the comma is mended, the cut is
+        # not, and the reason still names what was wrong with the reply as it came.
+        reply = '{"title": "T",\n "body_markdown": "%s"\n "tags": ["css"' % ("Use **grid**. " * 30)
+        missing_comma_at = reply.index('"tags"')       # not the end, where the mended one breaks
+        with self.assertRaisesRegex(LLMBadReply, r"Expecting ',' delimiter: .*\(char %d\)\)$" % missing_comma_at):
+            skills.parse_post(reply)
+
+    def test_a_mended_reply_is_still_checked_strictly(self):
+        reply = '{"title": "%s",\n "body_markdown": "%s"\n "tags": ["css"]}' % (
+            "t" * (skills.MAX_TITLE_CHARS + 1), "Use **grid**. " * 30)
+        with self.assertRaisesRegex(LLMBadReply, "title"):
+            skills.parse_post(reply)
+
+    def test_a_valid_reply_is_never_touched(self):
+        # Inside a valid string the same characters are escaped, so nothing to mend.
+        body = 'Write "a"\\n"tags": like this. ' * 10
+        post = skills.parse_post(json.dumps({"title": "T", "body_markdown": body, "tags": ["css"]}))
+        self.assertIn('"a"\\n"tags": like this.', post.body)
+
+    def test_the_prompt_asks_for_a_post_that_fits_the_endpoint(self):
+        _, system = WRITE_POST.build(AGENT, {"topic": "css", "recent_titles": []})
+        self.assertIn("80 to 150 words", system)
+        self.assertNotIn("350", system)
 
 
 class PostIsDueTests(unittest.TestCase):

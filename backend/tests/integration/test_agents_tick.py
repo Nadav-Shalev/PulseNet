@@ -154,6 +154,24 @@ class CommentAndPostTests(TickTestCase):
         topic_prompt = self.service.provider.calls[0][0]
         self.assertIn("<topic>\nreact\n</topic>", topic_prompt)
 
+    def test_the_course_reply_missing_a_comma_is_posted(self):
+        # The exact reply the course endpoint gave on 2026-10-11 (bad_reply before
+        # the mend), through the whole tick: parsed, moderated, written.
+        reply = (TESTS_DIR / "fixtures" / "agent_replies" / "course" / "post_missing_comma.txt").read_text(
+            encoding="utf-8")
+        read = FakeConn(fetchall=[[AGENT_ROW], [], []],
+                        fetchone=[None, None, {"last_post": None, "now": NOW}])
+        write = FakeConn(fetchone=[(5,), (6,), (7,)], lastrowid=77)
+        connect = self.connections(read, write)
+        self.llm(reply, CLEAN)
+
+        result = self.tick(connect)
+
+        self.assertEqual((result.skill, result.outcome), ("write_post", "posted"))
+        self.assertEqual(write.find("insert into posts")[0][1][1],
+                         "Efficient Code Review Practices for Mobile Developers")
+        self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
+
 
 class LikeFollowTests(TickTestCase):
     def test_follow_needs_no_llm(self):
@@ -229,6 +247,23 @@ class NothingWrittenTests(TickTestCase):
         self.assertEqual(result.outcome, "bad_reply")
         self.assertEqual(self.purposes(), [("agent_reply_human", 131, "ok")])
         self.assertOnlyTheTurn("bad_reply")
+
+    def test_a_bad_reply_logs_why_and_its_size_never_its_text(self):
+        # So the next bad_reply in production is diagnosable from the journal alone.
+        reply = '{"comment": "Thanks, Ada" "extra": 1}'
+        with self.assertLogs("pulsenet.agents", level="WARNING") as logs:
+            result = self.reply_tick(reply)
+
+        self.assertEqual(result.detail, {"post_id": 7, "comment_id": 41, "thread_id": 40,
+                                         "reason": "the reply has no JSON object (Expecting ',' "
+                                                   "delimiter: line 1 column 27 (char 26))",
+                                         "reply_chars": len(reply)})
+        self.assertIn("reason", logs.output[0])
+        self.assertNotIn("Thanks", logs.output[0])
+
+    def test_a_reply_that_parses_but_is_wrong_says_which_check(self):
+        result = self.reply_tick('{"comment": ""}')
+        self.assertEqual(result.detail["reason"], "the agent reply has no comment")
 
     def test_llm_failures(self):
         for error, name in ((LLMRateLimited("429", retry_after=30), "LLMRateLimited"),
