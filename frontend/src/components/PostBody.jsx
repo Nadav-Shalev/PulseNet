@@ -39,12 +39,16 @@ export default function PostBody({ html, excerpt, loading, error, onLoad }) {
     if (!content || !clip) return undefined;
     const links = [...content.querySelectorAll('a[href]')];
     const measure = () => {
-      const limit = parseFloat(getComputedStyle(content).lineHeight) * 3;
-      const truncated = content.getBoundingClientRect().height > limit + 1;
-      setOverflows(truncated);
-      // The last em fades out: treat links entering that area as clipped too.
-      const fade = truncated && !expanded ? parseFloat(getComputedStyle(content).fontSize) : 0;
-      const bottom = clip.getBoundingClientRect().top + limit - fade;
+      // Measure the browser's actual three-line layout, including rich-text
+      // block spacing and heading sizes. Restore expansion before painting.
+      const previousClamp = clip.style.webkitLineClamp;
+      const previousExpanded = clip.dataset.expanded;
+      clip.dataset.expanded = 'false';
+      clip.style.webkitLineClamp = '3';
+      const bottom = clip.getBoundingClientRect().bottom;
+      setOverflows(clip.scrollHeight > clip.clientHeight + 1);
+      clip.style.webkitLineClamp = previousClamp;
+      clip.dataset.expanded = previousExpanded;
       // Sanitized anchors have no authored tabindex. Keep clipped links out of
       // the tab order without changing the HTML or rebuilding its structure.
       links.forEach(link => {
@@ -77,15 +81,19 @@ export default function PostBody({ html, excerpt, loading, error, onLoad }) {
       {html === null ? (
         <Typography variant="body2" color="text.secondary">{excerpt}</Typography>
       ) : (
-        <Box ref={clipRef} id={bodyId} sx={{
-          maxHeight: expanded ? 'none' : '5.25em',
+        <Box ref={clipRef} id={bodyId} data-expanded={expanded} sx={{
+          display: '-webkit-box',
+          WebkitBoxOrient: 'vertical',
+          WebkitLineClamp: expanded ? 'unset' : 3,
           overflow: expanded ? 'visible' : 'hidden',
-          maskImage: !expanded && overflows ? 'linear-gradient(to bottom, #000 calc(100% - 1em), transparent)' : 'none',
+          // A scrollable pre creates a separate formatting context in Chromium.
+          // Let its lines join the preview; restore scrolling when expanded.
+          '&[data-expanded="false"] pre': { overflow: 'visible', pb: 0 },
         }}>
           <Box
             ref={contentRef}
             className="rich-text"
-            sx={{ display: 'flow-root', '& > :first-child': { mt: 0 }, '& > :last-child': { mb: 0 } }}
+            sx={{ '& > :first-child': { mt: 0 }, '& > :last-child': { mb: 0 } }}
             dangerouslySetInnerHTML={markup}
           />
         </Box>

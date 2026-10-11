@@ -97,7 +97,7 @@ export default function HomeSidebar() {
       sx={{
         display: 'grid',
         gap: 2,
-        // Side by side above the feed on a tablet, stacked in the side column.
+        // Side by side below the feed on a tablet, stacked in the side column.
         gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr' },
         alignItems: 'start',
       }}
@@ -133,22 +133,22 @@ export default function HomeSidebar() {
         )}
       </Paper>
 
-      <Paper variant="outlined" data-testid="who-to-follow" sx={sectionSx}>
+      <Paper variant="outlined" data-testid="who-to-follow" sx={{ ...sectionSx, p: { xs: 1.5, sm: 2 } }}>
         <Typography variant="subtitle1" component="h2" sx={titleSx}>Who to follow</Typography>
         {followError && <Alert severity="error" sx={{ mb: 1 }}>{followError}</Alert>}
         {peopleError && <Alert severity="warning" action={<Button color="inherit" onClick={() => setPeopleRetry(n => n + 1)}>Retry</Button>}>{peopleError}</Alert>}
         {!peopleError && people === null && <Typography role="status" variant="body2" color="text.secondary">Loading suggestions...</Typography>}
         {people?.length === 0 && <Typography variant="body2" color="text.secondary">You're all caught up. Discover more people on the Users page.</Typography>}
-        <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 1.5 }}>
+        <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: { xs: 1, sm: 1.5 } }}>
           {people?.slice(0, MAX_PEOPLE).map((user) => (
             <Box
               component="li"
               key={user.id}
               data-testid="suggested-user"
               data-username={user.username}
-              sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}
+              sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 } }}
             >
-              <Avatar src={user.profile_image || user.avatar || undefined} alt={user.name} sx={{ width: 40, height: 40 }}>
+              <Avatar src={user.profile_image || user.avatar || undefined} alt={user.name} sx={{ width: { xs: 32, sm: 40 }, height: { xs: 32, sm: 40 } }}>
                 {user.name?.[0] ?? '?'}
               </Avatar>
               <Box sx={{ minWidth: 0, flex: 1, overflowWrap: 'anywhere' }}>

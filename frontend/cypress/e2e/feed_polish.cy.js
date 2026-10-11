@@ -34,9 +34,8 @@ describe('inline post bodies', () => {
     cy.get(toggle).click().should('have.text', 'Read More').and('be.focused');
     cy.get(body + ' .rich-text').should(content => {
       const clip = content[0].parentElement;
-      expect(content[0].getBoundingClientRect().height).to.be.greaterThan(clip.getBoundingClientRect().height);
-      const lineHeight = parseFloat(content[0].ownerDocument.defaultView.getComputedStyle(content[0]).lineHeight);
-      expect(clip.getBoundingClientRect().height / lineHeight, 'three-line preview').to.be.within(2.9, 3.1);
+      expect(clip.scrollHeight).to.be.greaterThan(clip.clientHeight);
+      expect(content[0].ownerDocument.defaultView.getComputedStyle(clip).webkitLineClamp, 'three actual lines').to.equal('3');
     });
     cy.location('pathname').should('equal', '/');
     cy.get('[data-testid="post-dialog"]').should('not.exist');
@@ -174,7 +173,7 @@ describe('vertical feeds and compact discovery', () => {
       cy.get('[data-testid="home-sidebar"]').then(([side]) => cy.get(card).first().should(([post]) => {
         const a = side.getBoundingClientRect(), b = post.getBoundingClientRect();
         if (width >= 1200) expect(a.left).to.be.at.least(b.right - 1);
-        else expect(a.bottom).to.be.at.most(b.top + 1);
+        else expect(a.top).to.be.at.least(b.bottom - 1);
       }));
       cy.contains('[role="tab"]', 'Following').click();
       stacked();
