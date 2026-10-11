@@ -75,7 +75,7 @@ GET /api/articles?username=alicedev&page=1&per_page=10
 
 ### `fetchArticleById(id)`
 
-Returns a single article with full HTML content for the "Read More" modal.
+Returns a single article with sanitized full HTML content for the inline post body and Comments dialog.
 
 **Request**
 ```

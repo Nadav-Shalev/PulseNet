@@ -50,7 +50,7 @@ export default function ReportDialog({ target, kind, onClose, onUnauthorized }) 
           </Alert>
         ) : (
           <>
-            <RadioGroup value={reason} onChange={e => setReason(e.target.value)}>
+            <RadioGroup aria-label="Report reason" value={reason} onChange={e => setReason(e.target.value)}>
               {REPORT_REASONS.map(r => (
                 <FormControlLabel
                   key={r.value}
@@ -67,6 +67,7 @@ export default function ReportDialog({ target, kind, onClose, onUnauthorized }) 
               multiline
               minRows={2}
               size="small"
+              label="Additional details (optional)"
               placeholder="Anything the admins should know? (optional)"
               value={details}
               onChange={e => setDetails(e.target.value)}

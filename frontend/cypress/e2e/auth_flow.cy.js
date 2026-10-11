@@ -16,6 +16,7 @@ describe('authentication flow', () => {
     cy.get('[data-testid="signup-repeat-password"]').type(password)
     cy.get('[data-testid="signup-submit"]').click()
 
+    cy.get('[data-testid="nav-settings"]').click()
     cy.get('[data-testid="nav-logout"]').should('be.visible').click()
     cy.get('[data-testid="logout-current-device"]').should('be.visible').click()
     cy.get('[data-testid="nav-logout"]').should('not.exist')

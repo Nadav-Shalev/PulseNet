@@ -23,7 +23,9 @@ export default function LoginPage() {
   // Set by the reset page after a new password was saved.
   const passwordReset = Boolean(useLocation().state?.passwordReset);
 
-  const handleLogin = async () => {
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    if (submitting) return;
     setError('');
     setAuthError(false);
     if (!email || !password) {
@@ -49,10 +51,10 @@ export default function LoginPage() {
   };
 
   return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 3, sm: 6 }, px: 2 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'center', mt: { xs: 0, sm: 3 } }}>
       <Card sx={{ maxWidth: 420, width: '100%' }}>
-        <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
-          <Typography variant="h5" fontWeight={700}>Welcome Back</Typography>
+        <CardContent component="form" noValidate onSubmit={handleLogin} sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 2.5, sm: 4 } }}>
+          <Typography variant="h5" component="h1" fontWeight={700}>Welcome Back</Typography>
           <Typography variant="body2" color="text.secondary">
             Sign in to your account
           </Typography>
@@ -83,6 +85,10 @@ export default function LoginPage() {
 
           <TextField
             label="Email"
+            type="email"
+            autoComplete="username"
+            required
+            disabled={submitting}
             placeholder="you@example.com"
             value={email}
             onChange={e => setEmail(e.target.value)}
@@ -91,6 +97,9 @@ export default function LoginPage() {
           />
           <TextField
             label="Password"
+            autoComplete="current-password"
+            required
+            disabled={submitting}
             type="password"
             placeholder="••••••••"
             value={password}
@@ -102,7 +111,7 @@ export default function LoginPage() {
             sx={{ alignSelf: 'flex-end', mt: -1 }}>
             Forgot password?
           </Link>
-          <Button data-testid="login-submit" variant="contained" fullWidth onClick={handleLogin} disabled={submitting}>
+          <Button data-testid="login-submit" variant="contained" fullWidth type="submit" disabled={submitting}>
             {submitting ? 'Logging in...' : 'Login'}
           </Button>
           <Divider>OR</Divider>

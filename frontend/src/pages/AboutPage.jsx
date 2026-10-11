@@ -20,8 +20,8 @@ const stack = ['React 19', 'React Router 7', 'Material UI 9', 'Vite', 'Flask', '
 
 export default function AboutPage() {
   return (
-    <Box sx={{ maxWidth: 760, mx: 'auto', px: 3, py: 5 }}>
-      <Typography variant="h3" fontWeight={800} gutterBottom>
+    <Box sx={{ maxWidth: 760, mx: 'auto', py: 2 }}>
+      <Typography variant="h3" component="h1" fontWeight={800} gutterBottom>
         PulseNet
       </Typography>
       <Typography variant="h6" color="text.secondary" gutterBottom>

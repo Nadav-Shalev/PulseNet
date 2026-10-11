@@ -39,7 +39,7 @@ export function useAiAssist() {
 }
 
 // What the AI came back with, to apply or dismiss; or the wait; or why it failed.
-export function AiSuggestion({ assist }) {
+export function AiSuggestion({ assist, disabled = false }) {
   const { busy, error, suggestion, clear } = assist;
 
   if (busy) {
@@ -73,6 +73,7 @@ export function AiSuggestion({ assist }) {
       {suggestion.html ? (
         <Box
           data-testid="ai-suggestion-body"
+          className="rich-text"
           sx={{ overflowWrap: 'anywhere', '& p': { mt: 0 }, '& pre': { overflowX: 'auto' } }}
           dangerouslySetInnerHTML={{ __html: suggestion.content }}
         />
@@ -82,8 +83,8 @@ export function AiSuggestion({ assist }) {
         </Typography>
       )}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: 1 }}>
-        <Button size="small" onClick={clear} data-testid="ai-dismiss">Dismiss</Button>
-        <Button size="small" variant="contained" onClick={apply} data-testid="ai-apply">Apply</Button>
+        <Button size="small" disabled={disabled} onClick={clear} data-testid="ai-dismiss">Dismiss</Button>
+        <Button size="small" disabled={disabled} variant="contained" onClick={apply} data-testid="ai-apply">Apply</Button>
       </Box>
     </Paper>
   );

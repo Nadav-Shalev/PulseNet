@@ -182,7 +182,7 @@ describe('reports and admin', () => {
   it('only an admin gets the admin page and API', () => {
     cy.apiSignup().then(() => {
       cy.visit('/')
-      cy.get('[data-testid="nav-logout"]').should('exist')        // logged in...
+      cy.get('[data-testid="nav-profile"]').should('exist')       // logged in...
       cy.get('[data-testid="nav-admin"]').should('not.exist')     // ...but not an admin
       cy.visit('/admin')
       cy.get('[data-testid="admin-forbidden"]').should('contain', 'Admins only')

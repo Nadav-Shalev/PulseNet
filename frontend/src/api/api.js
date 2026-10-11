@@ -6,30 +6,21 @@ const BASE = BACKEND_URL;
 const CREDS = { credentials: 'include' };
 
 export const fetchArticles = (page = 1, perPage = 10) =>
-  fetch(`${BASE}/articles?page=${page}&per_page=${perPage}`, CREDS).then(r => r.json());
+  requestJson(`/articles?page=${page}&per_page=${perPage}`);
 
 export const fetchArticlesByUser = (username, page = 1, perPage = 10) =>
-  fetch(`${BASE}/articles?username=${encodeURIComponent(username)}&page=${page}&per_page=${perPage}`, CREDS)
-    .then(r => r.json());
+  requestJson(`/articles?username=${encodeURIComponent(username)}&page=${page}&per_page=${perPage}`);
 
 export const fetchArticlesByTag = (tag, page = 1, perPage = 10) =>
-  fetch(`${BASE}/articles?tag=${encodeURIComponent(tag)}&page=${page}&per_page=${perPage}`, CREDS)
-    .then(r => r.json());
+  requestJson(`/articles?tag=${encodeURIComponent(tag)}&page=${page}&per_page=${perPage}`);
 
 // Following feed: only posts from users the logged-in user follows. Requires a
 // valid session cookie (backend returns 401 otherwise).
-export const fetchFollowingArticles = async (page = 1, perPage = 10) => {
-  const res = await fetch(`${BASE}/articles?feed=following&page=${page}&per_page=${perPage}`, CREDS);
-  if (!res.ok) {
-    const err = new Error(`Request failed (${res.status})`);
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
-};
+export const fetchFollowingArticles = (page = 1, perPage = 10) =>
+  requestJson(`/articles?feed=following&page=${page}&per_page=${perPage}`);
 
 export const fetchArticleById = (id) =>
-  fetch(`${BASE}/articles/${id}`, CREDS).then(r => r.json());
+  requestJson(`/articles/${id}`);
 
 // Owner-only: delete a post (backend verifies ownership and cleans up posts_tags).
 export const deleteArticle = async (id) => {
@@ -127,8 +118,7 @@ export const deleteComment = async (commentId) => {
 // Paged user list for the Users page. `q` filters by username or name on the
 // backend; limit/offset drive the "first 10 + Load More" flow.
 export const fetchUsers = (q = '', limit = 10, offset = 0) =>
-  fetch(`${BASE}/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`, CREDS)
-    .then(r => r.json());
+  requestJson(`/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`);
 
 export const fetchUserProfile = async (username) => {
   const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}`, CREDS);
@@ -142,7 +132,7 @@ export const fetchUserProfile = async (username) => {
 };
 
 export const searchTags = (q) =>
-  fetch(`${BASE}/tags/search?q=${encodeURIComponent(q)}`, CREDS).then(r => r.json());
+  requestJson(`/tags/search?q=${encodeURIComponent(q)}`);
 
 // Follow / unfollow. The follower is derived from the session cookie on the
 // backend; we only pass the target user's id. Both return { following: bool }.

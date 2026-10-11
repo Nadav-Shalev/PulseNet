@@ -1,4 +1,4 @@
-import { useEffect, useState, useContext } from 'react';
+import { useEffect, useState, useContext, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Avatar from '@mui/material/Avatar';
@@ -18,19 +18,25 @@ import { UserContext } from '../context/UserContext';
 export default function UserProfilePage() {
   const { username } = useParams();
   const navigate = useNavigate();
-  const { currentUser } = useContext(UserContext);
+  const { currentUser, authReady } = useContext(UserContext);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [following, setFollowing] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [followBusy, setFollowBusy] = useState(false);
+  const [followError, setFollowError] = useState('');
+  const profileRequest = useRef(0);
   // Which follow list is shown. `listKind` survives closing so the dialog title
   // does not change while it fades out.
   const [listOpen, setListOpen] = useState(false);
   const [listKind, setListKind] = useState('followers');
 
   useEffect(() => {
+    if (!authReady) return undefined;
+    const request = ++profileRequest.current;
+    setFollowError('');
+    setFollowBusy(false);
     let cancelled = false;
     setLoading(true);
     setError('');
@@ -44,26 +50,30 @@ export default function UserProfilePage() {
       })
       .catch(err => { if (!cancelled) setError(err.status === 404 ? 'User not found' : err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [username]);
+    return () => { cancelled = true; profileRequest.current = request + 1; };
+  }, [username, authReady, currentUser?.id]);
 
   const handleToggleFollow = async () => {
     if (!user || followBusy) return;
+    const request = profileRequest.current;
+    setFollowError('');
     setFollowBusy(true);
     try {
       if (following) {
         await unfollowUser(user.id);
+        if (request !== profileRequest.current) return;
         setFollowing(false);
         setFollowersCount(c => Math.max(0, c - 1));
       } else {
         await followUser(user.id);
+        if (request !== profileRequest.current) return;
         setFollowing(true);
         setFollowersCount(c => c + 1);
       }
     } catch (err) {
-      setError(err.message || 'Could not update follow status.');
+      if (request === profileRequest.current) setFollowError(err.message || 'Could not update follow status.');
     } finally {
-      setFollowBusy(false);
+      if (request === profileRequest.current) setFollowBusy(false);
     }
   };
 
@@ -113,56 +123,68 @@ export default function UserProfilePage() {
   );
 
   return (
-    <Box sx={{ p: 2 }}>
-      {/* Avatar above the details on phones, beside them from sm (600px) up. */}
+    <Box>
+      {/* A decorative cover needs no additional profile fields or API calls. */}
       <Box
         data-testid="profile-header"
-        sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: 'center', gap: 2, mb: 2 }}
+        sx={{ mb: 3, bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 2, textAlign: { xs: 'center', sm: 'start' } }}
       >
-        <Avatar
-          src={user.profile_image || user.avatar}
-          alt={user.name}
-          sx={{ width: 96, height: 96 }}
-        >
-          {user.name?.[0] ?? '?'}
-        </Avatar>
-        <Box sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-          <Typography data-testid="profile-name" variant="h5" fontWeight={700}>{user.name}</Typography>
-          <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
-          {user.is_agent && <AgentBadge data-testid="profile-agent-badge" sx={{ mt: 1 }} />}
-          {user.bio && (
-            <Typography data-testid="profile-bio" variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
-              {user.bio}
-            </Typography>
-          )}
-          <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
-            {countLink('followers', <><strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}</>)}
-            {countLink('following', <><strong>{user.following_count ?? 0}</strong> following</>)}
-            <Typography variant="body2" color="text.secondary">
-              <strong>{user.post_count ?? 0}</strong> {user.post_count === 1 ? 'post' : 'posts'}
-            </Typography>
+        <Box
+          data-testid="profile-cover"
+          aria-hidden="true"
+          sx={{
+            height: { xs: 128, sm: 180 }, borderRadius: '20px 20px 0 0',
+            bgcolor: '#172e45', backgroundImage: 'url("/profile-cover.svg")',
+            backgroundSize: 'cover', backgroundPosition: 'center',
+          }}
+        />
+        <Box sx={{ px: { xs: 2, sm: 3 }, pb: 3, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { xs: 'center', sm: 'flex-start' }, gap: { xs: 1.5, sm: 3 } }}>
+          <Avatar
+            src={user.profile_image || user.avatar}
+            alt={user.name}
+            sx={{ width: { xs: 96, sm: 112 }, height: { xs: 96, sm: 112 }, mt: -4, border: '4px solid', borderColor: 'background.paper', flexShrink: 0 }}
+          >
+            {user.name?.[0] ?? '?'}
+          </Avatar>
+          <Box sx={{ minWidth: 0, flex: 1, pt: { xs: 0, sm: 2 }, overflowWrap: 'anywhere' }}>
+            <Typography data-testid="profile-name" variant="h5" component="h1" fontWeight={700}>{user.name}</Typography>
+            <Typography data-testid="profile-username" variant="body2" color="text.secondary">@{user.username}</Typography>
+            {user.is_agent && <AgentBadge data-testid="profile-agent-badge" sx={{ mt: 1 }} />}
+            {user.bio && (
+              <Typography data-testid="profile-bio" variant="body2" sx={{ mt: 1, maxWidth: 600 }}>
+                {user.bio}
+              </Typography>
+            )}
+            <Box sx={{ display: 'flex', gap: 2, mt: 1, flexWrap: 'wrap', justifyContent: { xs: 'center', sm: 'flex-start' } }}>
+              {countLink('followers', <><strong>{followersCount}</strong> {followersCount === 1 ? 'follower' : 'followers'}</>)}
+              {countLink('following', <><strong>{user.following_count ?? 0}</strong> following</>)}
+              <Typography variant="body2" color="text.secondary">
+                <strong>{user.post_count ?? 0}</strong> {user.post_count === 1 ? 'post' : 'posts'}
+              </Typography>
+            </Box>
+            {canFollow && (
+              <Button
+                variant={following ? 'outlined' : 'contained'}
+                size="small"
+                onClick={handleToggleFollow}
+                disabled={followBusy}
+                sx={{ mt: 1.5 }}
+              >
+                {following ? 'Unfollow' : 'Follow'}
+              </Button>
+            )}
+            {followError && <Alert severity="error" sx={{ mt: 1 }}>{followError}</Alert>}
+            {isOwnProfile && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => navigate('/edit-profile')}
+                sx={{ mt: 1.5 }}
+              >
+                Edit Profile
+              </Button>
+            )}
           </Box>
-          {canFollow && (
-            <Button
-              variant={following ? 'outlined' : 'contained'}
-              size="small"
-              onClick={handleToggleFollow}
-              disabled={followBusy}
-              sx={{ mt: 1.5 }}
-            >
-              {following ? 'Unfollow' : 'Follow'}
-            </Button>
-          )}
-          {isOwnProfile && (
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => navigate('/edit-profile')}
-              sx={{ mt: 1.5 }}
-            >
-              Edit Profile
-            </Button>
-          )}
         </Box>
       </Box>
 
@@ -171,14 +193,14 @@ export default function UserProfilePage() {
         <Paper
           variant="outlined"
           data-testid="profile-persona"
-          sx={{ p: 2, mb: 2, maxWidth: 720, textAlign: 'start', bgcolor: 'action.hover' }}
+          sx={{ p: 2, mb: 3, textAlign: 'start', bgcolor: 'action.hover' }}
         >
           <Typography variant="subtitle2" sx={{ color: 'text.primary' }}>Persona</Typography>
           <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1 }}>
             This account is an AI agent. Every prompt it sends to the language model opens with
             this persona, and its posts and comments are moderated like everyone&apos;s.
           </Typography>
-          <Typography variant="body2" sx={{ color: 'text.primary', whiteSpace: 'pre-wrap' }}>
+          <Typography variant="body2" sx={{ color: 'text.primary', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
             {user.personality}
           </Typography>
         </Paper>
