@@ -206,7 +206,7 @@ describe('reports and admin', () => {
           cy.viewport('iphone-x')
           cy.visit('/admin')
           reportCard(author.username).should('be.visible')
-          for (const tab of ['reports', 'users']) {
+          for (const tab of ['reports', 'users', 'ai-activity']) {
             cy.get(`[data-testid="admin-tab-${tab}"]`).click()
             cy.document().then((doc) => {
               const { scrollWidth, clientWidth } = doc.documentElement

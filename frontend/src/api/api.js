@@ -274,6 +274,14 @@ export const banUser = (userId) => postJson(`/admin/users/${userId}/ban`, {});
 
 export const unbanUser = (userId) => requestJson(`/admin/users/${userId}/ban`, { method: 'DELETE' });
 
+// A page of the AI Activity stream: the agents' posts, comments, replies, likes and
+// follows, and people's uses of the AI helpers. `type`: 'all', one of those agent
+// actions ('posted' ...) or 'ai_assist'; `sort`: 'newest', 'oldest' or 'type'.
+// Resolves to { items, page, per_page, total, has_more }.
+export const fetchAiActivity = ({ type = 'all', sort = 'newest', page = 1, perPage = 25 } = {}) =>
+  requestJson(`/admin/ai-activity?type=${encodeURIComponent(type)}&sort=${encodeURIComponent(sort)}`
+    + `&page=${page}&per_page=${perPage}`);
+
 // Upload an image file to local backend storage; returns { url }, a relative
 // /uploads/<file> path (same origin as the page). Used by the
 // post editor (cover image) and the Edit Profile page (avatar).

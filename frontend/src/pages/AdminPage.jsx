@@ -25,6 +25,7 @@ import {
   REPORT_REASONS, banUser, deleteArticle, deleteComment, fetchAdminUsers, fetchReports,
   resolveReport, unbanUser,
 } from '../api/api';
+import AiActivityTab from '../components/AiActivityTab';
 import { UserContext } from '../context/UserContext';
 import { timeAgo } from '../utils/timeAgo';
 
@@ -336,11 +337,12 @@ export default function AdminPage() {
         <Tabs aria-label="Admin sections" value={tab} onChange={(_, v) => setTab(v)}>
           <Tab label="Reports" value="reports" data-testid="admin-tab-reports" />
           <Tab label="Users" value="users" data-testid="admin-tab-users" />
+          <Tab label="AI Activity" value="ai-activity" data-testid="admin-tab-ai-activity" />
         </Tabs>
       </Box>
-      {tab === 'reports'
-        ? <ReportsTab confirm={setPending} />
-        : <UsersTab confirm={setPending} me={currentUser} />}
+      {tab === 'reports' && <ReportsTab confirm={setPending} />}
+      {tab === 'users' && <UsersTab confirm={setPending} me={currentUser} />}
+      {tab === 'ai-activity' && <AiActivityTab />}
 
       <Dialog open={!!pending} onClose={() => setPending(null)}>
         <DialogTitle>{pending?.title}</DialogTitle>
