@@ -284,6 +284,38 @@ class CourseReplyTests(unittest.TestCase):
         self.assertNotIn("350", system)
 
 
+class TagsFieldReasonTests(unittest.TestCase):
+    """Each way "tags" can fail has its own reason, so a bad_reply in the journal
+    says which one the model did (2026-10-11: one reason hid all four)."""
+
+    def test_each_failure_of_the_tags_field_has_its_own_reason(self):
+        no_tags = json.loads(_post_reply())
+        del no_tags["tags"]
+        cases = {
+            "the field is missing": json.dumps(no_tags),
+            r"not a list \(str\)": _post_reply(tags="css, grid"),
+            r"not a list \(NoneType\)": _post_reply(tags=None),
+            r"not a list \(dict\)": _post_reply(tags={"css": 1}),
+            "the list is empty": _post_reply(tags=[]),
+            "5 in the list, more than 4": _post_reply(tags=["css", "grid", "flex", "layout", "webdev"]),
+        }
+        for reason, reply in cases.items():
+            with self.subTest(reason):
+                with self.assertRaisesRegex(LLMBadReply, f"^the agent post tags: {reason}$"):
+                    skills.parse_post(reply)
+
+    def test_a_reason_carries_no_text_of_the_reply(self):
+        for tags in ("secretword, other", ["secretword"] * 6):
+            with self.subTest(tags=type(tags).__name__):
+                with self.assertRaises(LLMBadReply) as caught:
+                    skills.parse_post(_post_reply(tags=tags))
+                self.assertNotIn("secretword", str(caught.exception))
+
+    def test_max_tags_is_still_allowed(self):
+        post = skills.parse_post(_post_reply(tags=["css", "grid", "flex", "layout"]))
+        self.assertEqual(post.tags, ("css", "grid", "flex", "layout"))
+
+
 class TagNameTests(unittest.TestCase):
     def test_a_tag_is_trimmed_lower_case_and_without_a_hash(self):
         for raw, name in ((" #Rust ", "rust"), ("CSS", "css"), ("a11y", "a11y"), ("k8s", "k8s"),

@@ -184,6 +184,26 @@ class CommentAndPostTests(TickTestCase):
                          "Efficient Code Review Practices for Mobile Developers")
         self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
 
+    def test_a_post_with_too_many_tags_logs_which_check_failed_and_no_text(self):
+        reply = json.dumps({"title": "Five CSS tricks", "body_markdown": "Use **grid** for layout. " * 20,
+                            "tags": ["css", "grid", "flex", "layout", "webdev"]})
+        connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], [], []],
+                                            fetchone=[None, None, {"last_post": None, "now": NOW}]))
+        self.llm(reply)
+
+        with self.assertLogs("pulsenet.agents", level="WARNING") as logs:
+            result = self.tick(connect)
+
+        self.assertEqual((result.skill, result.outcome), ("write_post", "bad_reply"))
+        self.assertEqual(result.detail, {"reason": "the agent post tags: 5 in the list, more than 4",
+                                         "reply_chars": len(reply)})
+        self.assertIn("5 in the list, more than 4", logs.output[0])
+        for text in ("CSS", "grid", "layout"):
+            self.assertNotIn(text, logs.output[0])
+        self.assertEqual(self.purposes(), [("agent_post", 131, "ok")])     # not moderated
+        self.assertFalse(self.write.ran("insert into posts"))
+        self.assertEqual(self.write.params_for("insert into agent_actions"), (131, "write_post", "bad_reply"))
+
     def test_a_post_tagged_with_numbers_is_stored_with_its_hashtags(self):
         # Production post 38 (2026-10-11), reconstructed: "tags" ["1", "3", "5"] and a
         # body that ends in "#rust #beginners #performance #memoryefficiency". It was

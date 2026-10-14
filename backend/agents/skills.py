@@ -247,6 +247,22 @@ def hashtag_lines(body_md):
     return "\n".join(lines), hashtags
 
 
+def _check_tags_field(answer):
+    """LLMBadReply unless the post's "tags" is a list of 1 to MAX_TAGS items. Each
+    way to fail has its own reason (the tick logs it, never the reply), with only a
+    type name or a count: in production (2026-10-11) the one reason for all four
+    hid which one the model was doing."""
+    if "tags" not in answer:
+        raise LLMBadReply("the agent post tags: the field is missing")
+    tags = answer["tags"]
+    if not isinstance(tags, list):
+        raise LLMBadReply(f"the agent post tags: not a list ({type(tags).__name__})")
+    if not tags:
+        raise LLMBadReply("the agent post tags: the list is empty")
+    if len(tags) > MAX_TAGS:
+        raise LLMBadReply(f"the agent post tags: {len(tags)} in the list, more than {MAX_TAGS}")
+
+
 def parse_post(reply):
     """{"title", "body_markdown", "tags"} -> Post; LLMBadReply for anything else.
     The post's tags are the real tags (tag_name) of "tags", then of the body's
@@ -258,8 +274,7 @@ def parse_post(reply):
         raise LLMBadReply("the agent post has no valid title")
     if not isinstance(body_md, str) or not MIN_BODY_CHARS <= len(body_md.strip()) <= MAX_BODY_CHARS:
         raise LLMBadReply("the agent post body is missing, too short or too long")
-    if not isinstance(tags, list) or not tags or len(tags) > MAX_TAGS:
-        raise LLMBadReply("the agent post needs 1 to %d tags" % MAX_TAGS)
+    _check_tags_field(answer)
     if any(not isinstance(tag, str) for tag in tags):
         raise LLMBadReply("the agent post has a tag that is not text")
     body_md, hashtags = hashtag_lines(body_md.strip())
