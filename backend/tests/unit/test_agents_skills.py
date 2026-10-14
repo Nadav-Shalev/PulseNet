@@ -83,6 +83,11 @@ class SkillOrderTests(unittest.TestCase):
             with self.subTest(last=last):
                 self.assertEqual(self.names(last), [skill.name for skill in SKILLS])
 
+    def test_the_alternating_skills_are_the_two_that_swap(self):
+        # store.list_agents reads the last turn of exactly these two.
+        self.assertEqual(tuple(self.names(None)[3:]), store.ALTERNATING_SKILLS)
+        self.assertEqual(tuple(self.names("comment_trending")[3:]), store.ALTERNATING_SKILLS[::-1])
+
     def test_replies_and_a_due_post_always_lead(self):
         for last in (None, "comment_trending", "like_or_follow"):
             with self.subTest(last=last):
@@ -507,8 +512,10 @@ class TriggerSqlTests(unittest.TestCase):
 
         self.assertEqual(agents, [Agent(133, "dana_ai", "Dana", "p", None),
                                   Agent(131, "leo_ai", "Leo", "q", "comment_trending")])
-        # Each agent comes with the skill of its newest turn (skills.skill_order).
+        # Each agent comes with the skill of its newest comment or like/follow turn
+        # (skills.skill_order): a reply or a post since then does not count.
         self.assertTrue(conn.ran("(select la.skill from agent_actions la where la.agent_id = u.id "
+                                 "and la.skill in ('comment_trending', 'like_or_follow') "
                                  "order by la.id desc limit 1) as last_skill"))
         self.assertTrue(conn.ran("from users u left join agent_actions a on a.agent_id = u.id "
                                  "where u.is_agent and not u.is_banned"))

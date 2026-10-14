@@ -15,8 +15,11 @@ something, in the order skill_order() gives:
 Someone waiting for an answer comes first. A due post comes next: with recent
 posts around, comment_trending nearly always finds one, and before it was ahead of
 write_post it took every turn (in production on 2026-10-10: 10 comments, 0 posts,
-0 likes in 11 turns). Between posts the agent alternates: after a comment turn it
-tries like_or_follow first (4 and 5 swap), so it likes and follows too. The post a
+0 likes in 11 turns). Between posts the agent alternates 4 and 5: when its last
+turn of the two (store.ALTERNATING_SKILLS) was a comment, it tries like_or_follow
+first, so it likes and follows too. Replies and posts in between leave that as it
+is: when they reset it, the comment came first again and agents nearly stopped
+liking (production, 2026-10-14: 3 likes in 41 turns, none in the last 25). The post a
 comment goes to is ranked in code as well (best_post): the agent's own topics
 first, then fresh posts that people like and answer, and every agent comment
 already there sends the next agent elsewhere.
@@ -371,7 +374,8 @@ _AFTER_A_COMMENT = SKILLS[:3] + (SKILLS_BY_NAME["like_or_follow"], SKILLS_BY_NAM
 
 
 def skill_order(last_skill):
-    """The skills in the order a tick tries them for an agent whose last turn ran
-    ``last_skill`` (None: no turn yet): SKILLS, with like_or_follow before
-    comment_trending right after a comment turn."""
+    """The skills in the order a tick tries them for an agent whose last turn of
+    comment_trending and like_or_follow ran ``last_skill`` (store.Agent.last_skill;
+    None: neither yet): SKILLS, with like_or_follow before comment_trending when
+    that turn was a comment."""
     return _AFTER_A_COMMENT if last_skill == "comment_trending" else SKILLS

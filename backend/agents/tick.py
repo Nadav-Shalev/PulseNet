@@ -7,8 +7,9 @@
    turns (agent_actions) stops here as ``capped``. Then the agents are tried in
    turn order (store.list_agents: never acted first, then the oldest last turn), or
    only the one named; for each, the skills' triggers run in the order
-   skills.skill_order() gives for its last turn (replies, a due post, then a comment
-   or a like/follow, alternating), and the first that finds something wins. An agent with nothing to do does not
+   skills.skill_order() gives for its last comment or like/follow turn (replies, a
+   due post, then a comment or a like/follow, alternating), and the first that
+   finds something wins. An agent with nothing to do does not
    hold up the next one, and keeps its place at the front of the queue.
    When the LLM is off (``service`` is None), every skill that needs it is skipped
    before its trigger runs, so only like_or_follow is tried. The connection is then

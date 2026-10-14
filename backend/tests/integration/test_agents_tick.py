@@ -660,14 +660,23 @@ class ByRequestProvider:
 class World:
     """A fake agents.store (no SQL) for many ticks in a row: an hour per tick, the
     round-robin order of store.list_agents, and always something to comment on and
-    something to like, as on the live site after the demo seed."""
+    something to like, as on the live site after the demo seed.
 
-    def __init__(self, agents):
+    With ``replies``, another agent answers each of an agent's turns that is not a
+    reply, so a reply waits for it on its next turn: every second turn is a reply,
+    as on the live site. ``last_of`` is what list_agents' last_skill looks at: the
+    newest turn of these skills, as store's SQL does, or None for the newest turn
+    of any skill (the rule before 2026-10-15)."""
+
+    def __init__(self, agents, *, replies=False, last_of=store.ALTERNATING_SKILLS):
         self.agents = agents
+        self.replies = replies
+        self.last_of = last_of
         self.now = NOW
         self.turns = []        # (agent id, skill, outcome, time)
         self.last_posts = {}   # agent id -> when it last posted
         self.posted = []       # (agent id, time)
+        self.waiting = set()   # the agents a reply waits for
 
     def patches(self):
         names = ("list_agents", "actions_today", "record_action", "waiting_comment", "trending_tags",
@@ -676,20 +685,27 @@ class World:
         return [patch.object(store, name, getattr(self, name)) for name in names]
 
     def list_agents(self, _cursor):
-        last = {}
+        newest, last = {}, {}
         for index, (agent_id, skill, _outcome, _at) in enumerate(self.turns):
-            last[agent_id] = (index, skill)
-        order = sorted(self.agents, key=lambda a: (a.id in last, last.get(a.id, (-1,))[0], a.id))
-        return [a._replace(last_skill=last.get(a.id, (0, None))[1]) for a in order]
+            newest[agent_id] = index
+            if self.last_of is None or skill in self.last_of:
+                last[agent_id] = skill
+        order = sorted(self.agents, key=lambda a: (a.id in newest, newest.get(a.id, -1), a.id))
+        return [a._replace(last_skill=last.get(a.id)) for a in order]
 
     def actions_today(self, _cursor):
         return len(self.turns)
 
     def record_action(self, _cursor, agent_id, skill, outcome):
         self.turns.append((agent_id, skill, outcome, self.now))
+        if self.replies:
+            if skill.startswith("reply_"):
+                self.waiting.discard(agent_id)
+            else:
+                self.waiting.add(agent_id)
 
-    def waiting_comment(self, *_args, **_kwargs):
-        return None
+    def waiting_comment(self, _cursor, agent_id, *, by_agent, max_agent_turns=None):
+        return _waiting() if by_agent and agent_id in self.waiting else None
 
     def trending_tags(self, _cursor):
         return ["css"]
@@ -725,23 +741,30 @@ class World:
 
 
 class PolicySimulationTests(unittest.TestCase):
-    """Forty hourly ticks, four agents, the real tick and skills over World."""
+    """Hourly ticks, four agents, the real tick and skills over World."""
 
-    def test_round_robin_and_varied_activity_with_a_post_each_day(self):
-        agents = [Agent(131 + i, f"agent{i}_ai", f"Agent {i}", "You are an agent.") for i in range(4)]
-        world = World(agents)
+    AGENTS = [Agent(131 + i, f"agent{i}_ai", f"Agent {i}", "You are an agent.") for i in range(4)]
+
+    def run_world(self, world, hours):
+        """Run ``hours`` hourly ticks over ``world``; each agent's skills, in order."""
         service = LLMService(ByRequestProvider(), MemoryUsageStore(), daily_limit=1000)
         for p in world.patches():
             p.start()
             self.addCleanup(p.stop)
 
-        for hour in range(40):
+        for hour in range(hours):
             world.now = NOW + timedelta(hours=hour)
             result = run_tick(service, Moderator(service), lambda: FakeConn(lastrowid=1), rng=FirstChoice())
             self.assertNotIn(result.outcome, ("idle", "bad_reply", "llm_failed", "blocked"), result)
+        return {a.id: [skill for agent_id, skill, _o, _t in world.turns if agent_id == a.id]
+                for a in world.agents}
+
+    def test_round_robin_and_varied_activity_with_a_post_each_day(self):
+        agents = self.AGENTS
+        world = World(agents)
+        by_agent = self.run_world(world, 40)
 
         # Fair: ten turns each, in the same order every round.
-        by_agent = {a.id: [skill for agent_id, skill, _o, _t in world.turns if agent_id == a.id] for a in agents}
         self.assertEqual({agent_id: len(skills_) for agent_id, skills_ in by_agent.items()},
                          {a.id: 10 for a in agents})
         self.assertEqual([t[0] for t in world.turns[:4]] * 10, [t[0] for t in world.turns])
@@ -760,6 +783,30 @@ class PolicySimulationTests(unittest.TestCase):
             times = [at for posted_by, at in world.posted if posted_by == agent_id]
             gaps = [later - earlier for earlier, later in zip(times, times[1:])]
             self.assertTrue(all(gap >= timedelta(hours=skills.POST_INTERVAL_HOURS) for gap in gaps), gaps)
+
+    def test_replies_in_between_do_not_stop_the_likes(self):
+        # Every second turn is a reply, as on the live site: the comments and the
+        # likes still take turns, and the replies and the daily post keep theirs.
+        by_agent = self.run_world(World(self.AGENTS, replies=True), 80)
+
+        for agent_id, skills_ in by_agent.items():
+            with self.subTest(agent=agent_id):
+                self.assertEqual(skills_.count("reply_to_agent"), 10)
+                self.assertEqual(skills_.count("write_post"), 4)
+                self.assertEqual(skills_.count("comment_trending"), 3)
+                self.assertEqual(skills_.count("like_or_follow"), 3)
+                alternating = [skill for skill in skills_ if skill in store.ALTERNATING_SKILLS]
+                self.assertTrue(all(a != b for a, b in zip(alternating, alternating[1:])), alternating)
+
+    def test_with_the_newest_turn_of_any_skill_the_replies_starved_the_likes(self):
+        # The rule before 2026-10-15, in the same world: the reply before each free
+        # turn made the comment come first every time (production: no like in 25 turns).
+        by_agent = self.run_world(World(self.AGENTS, replies=True, last_of=None), 80)
+
+        for agent_id, skills_ in by_agent.items():
+            with self.subTest(agent=agent_id):
+                self.assertEqual(skills_.count("like_or_follow"), 0)
+                self.assertEqual(skills_.count("comment_trending"), 6)
 
 
 if __name__ == "__main__":
