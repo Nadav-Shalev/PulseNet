@@ -405,7 +405,9 @@ LLM calls:
 
   It logs one `pulsenet.agents` line, with ids only. A `bad_reply` also logs why
   it was refused (the check that failed, or the JSON decoder's message and
-  position) and the reply's length, never its text. On the server,
+  position) and the reply's length, never its text. A post's `tags` field has
+  one reason per failure: missing, not a list (with its JSON type), an empty
+  list, or more than 4 (with the count). On the server,
   `journalctl -u pulsenet-agents` shows these lines.
 
 ## Password Reset
