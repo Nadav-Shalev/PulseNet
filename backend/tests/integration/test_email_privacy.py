@@ -3,7 +3,7 @@
 Public endpoints (feeds, a single post, user search, the user list, profiles,
 follow lists, a newly created post, who to follow, trending tags) never put an
 email in the response, and
-neither do the admin lists (users, reports): an admin needs no address either. Their SQL
+neither do the admin lists (users, reports, AI activity): an admin needs no address either. Their SQL
 neither selects nor filters on the email column, so search results can't be used
 to probe for an address either. Only the caller's own record carries it:
 GET/PATCH /api/me and the login/signup responses.
@@ -325,6 +325,16 @@ class AdminResponsesHideEmailTests(unittest.TestCase):
             "author_username": "ada", "author_is_banned": 0, "email": ADA_EMAIL,
         }]])
         self.assertNoEmail(self._get("/api/admin/reports", conn), conn)
+
+    def test_admin_ai_activity(self):
+        # The row carries emails on purpose: the event shape must not pass them on.
+        row = {"source": "agent", "source_id": 1, "created_at": datetime(2026, 10, 15, 19, 0), "kind": "followed",
+               "status": None, "actor_id": 6, "actor_username": "priya_ai", "actor_name": "Priya",
+               "actor_is_agent": 1, "actor_email": "priya_ai@agents.pulsenet.invalid",
+               "post_id": None, "post_title": None, "comment_id": None, "target_id": 42,
+               "target_username": "ada", "target_name": "Ada", "target_is_agent": 0, "target_email": ADA_EMAIL}
+        conn = FakeConn(fetchone=[{"n": 1}, {"n": 0}], fetchall=[[row]])
+        self.assertNoEmail(self._get("/api/admin/ai-activity", conn), conn)
 
 
 if __name__ == "__main__":

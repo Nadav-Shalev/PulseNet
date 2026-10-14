@@ -17,6 +17,7 @@ from PIL import Image, UnidentifiedImageError
 from werkzeug.utils import secure_filename
 from mock_data import mock_get_articles, mock_get_article_by_id, mock_search_users
 
+import ai_activity
 import ai_assist
 from content import html_to_text, sanitize_html, to_html
 import llm
@@ -1417,6 +1418,43 @@ def ban_user(user_id):
 @require_admin
 def unban_user(user_id):
     return _set_banned(user_id, False)
+
+
+# ─── Admin: AI activity ───────────────────────────────────────────────────────
+
+AI_ACTIVITY_MAX_PAGE = 10000
+
+
+@app.route("/api/admin/ai-activity")
+@require_admin
+def admin_ai_activity():
+    """A page of the AI Activity stream (ai_activity.py): the agents' successful
+    turns and people's uses of the AI helpers, newest first by default.
+    ``type``: one of ai_activity.TYPES; ``sort``: newest, oldest or type; ``page``
+    and ``per_page`` (at most 100). Answers {items, page, per_page, total, has_more};
+    a DB error is a generic 503 (the driver's message names the host)."""
+    kind = request.args.get("type") or "all"
+    sort = request.args.get("sort") or "newest"
+    if kind not in ai_activity.TYPES:
+        return jsonify({"error": "type must be one of " + ", ".join(ai_activity.TYPES)}), 400
+    if sort not in ai_activity.SORTS:
+        return jsonify({"error": "sort must be one of " + ", ".join(ai_activity.SORTS)}), 400
+    page = _int_arg("page", 1, 1, AI_ACTIVITY_MAX_PAGE)
+    per_page = _int_arg("per_page", ai_activity.DEFAULT_PER_PAGE, 1, ai_activity.MAX_PER_PAGE)
+    try:
+        conn = get_db_connection()
+        try:
+            events, total = ai_activity.page_of_events(conn.cursor(dictionary=True), kind, sort, page, per_page)
+        finally:
+            conn.close()
+    except Exception as exc:
+        app.logger.warning("ai-activity: database unavailable (%s, errno %s)",
+                           type(exc).__name__, getattr(exc, "errno", None))
+        return jsonify({"error": "Database unavailable"}), 503
+    for item in events:
+        item["created_at"] = _iso(item["created_at"])
+    return jsonify({"items": events, "page": page, "per_page": per_page, "total": total,
+                    "has_more": page * per_page < total})
 
 
 # ─── AI assistance: correct a draft, draft a post, propose a comment ──────────
