@@ -30,7 +30,7 @@ const sectionSx = { p: 2, textAlign: 'start' };
 const titleSx = { color: 'text.primary', fontWeight: 700, mb: 1 };
 
 // Each discovery section loads independently, without blocking the feed.
-export default function HomeSidebar() {
+export default function HomeSidebar({ onNavigate } = {}) {
   const { currentUser, authReady } = useContext(UserContext);
   const [tags, setTags] = useState(null);
   const [people, setPeople] = useState(null);
@@ -97,8 +97,7 @@ export default function HomeSidebar() {
       sx={{
         display: 'grid',
         gap: 2,
-        // Side by side below the feed on a tablet, stacked in the side column.
-        gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr' },
+        gridTemplateColumns: 'minmax(0, 1fr)',
         alignItems: 'start',
       }}
     >
@@ -122,6 +121,7 @@ export default function HomeSidebar() {
                 data-testid="trending-tag"
                 component={RouterLink}
                 to={`/tag/${encodeURIComponent(tag.name)}`}
+                onClick={onNavigate}
                 clickable
                 size="small"
                 label={`#${tag.name}`}
@@ -155,6 +155,7 @@ export default function HomeSidebar() {
                 <Link
                   component={RouterLink}
                   to={`/profile/${encodeURIComponent(user.username)}`}
+                  onClick={onNavigate}
                   underline="hover"
                   sx={{ color: 'text.primary', fontWeight: 600 }}
                 >

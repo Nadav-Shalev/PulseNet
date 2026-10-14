@@ -170,11 +170,14 @@ describe('vertical feeds and compact discovery', () => {
       };
       cy.visit('/');
       stacked();
-      cy.get('[data-testid="home-sidebar"]').then(([side]) => cy.get(card).first().should(([post]) => {
-        const a = side.getBoundingClientRect(), b = post.getBoundingClientRect();
-        if (width >= 1200) expect(a.left).to.be.at.least(b.right - 1);
-        else expect(a.top).to.be.at.least(b.bottom - 1);
-      }));
+      if (width >= 1200) {
+        cy.get('[data-testid="home-sidebar"]').then(([side]) => cy.get(card).first().should(([post]) => {
+          expect(side.getBoundingClientRect().left).to.be.at.least(post.getBoundingClientRect().right - 1);
+        }));
+      } else {
+        cy.get('.App-feed [data-testid="home-sidebar"]').should('not.exist');
+        cy.get('[data-testid="mobile-discover-open"]').should('be.visible');
+      }
       cy.contains('[role="tab"]', 'Following').click();
       stacked();
       ['/profile/person2', '/user-posts/person2', '/tag/react'].forEach(route => {
@@ -191,6 +194,7 @@ describe('vertical feeds and compact discovery', () => {
       cy.intercept('GET', '**/api/users/suggested*', [1, 2, 3, 4, 5].map(person));
       cy.intercept('POST', '**/api/users/1/follow', { delay: 300, body: { following: true } }).as('follow');
       cy.visit('/');
+      if (width < 1200) cy.get('[data-testid="mobile-discover-open"]').click();
       cy.get('[data-testid="suggested-user"]').should('have.length', 3);
       cy.get('[data-username="person4"]').should('not.exist');
       cy.get('[data-username="person1"] [data-testid="suggested-follow"]').click().should('be.disabled');

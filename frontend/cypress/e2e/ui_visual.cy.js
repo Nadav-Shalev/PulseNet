@@ -77,10 +77,16 @@ describe('polish visual and accessibility checks', () => {
         themeVisit('/', dark);
         cy.get('[data-testid="nav-profile"]').should('exist');
         cy.get('[data-testid="post-card"]').should('have.length', 2);
-        cy.get('[data-testid="suggested-user"]').should('have.length', 2);
+        if (width >= 1200) cy.get('[data-testid="suggested-user"]').should('have.length', 2);
         cy.document().should(doc => expect(doc.defaultView.getComputedStyle(doc.documentElement).colorScheme).to.equal(mode));
         cy.get('[data-testid="post-body"]').first().contains('button', 'Read More').should('be.visible');
         shot('home');
+        if (width < 1200) {
+          cy.get('[data-testid="mobile-discover-open"]').click();
+          cy.get('[data-testid="suggested-user"]').should('have.length', 2);
+          shot('discovery');
+          cy.get('[aria-label="Close discovery"]').click();
+        }
         cy.get('[data-testid="post-body-toggle"]').first().click();
         shot('home-expanded');
         cy.get('[data-testid="post-body-toggle"]').first().click();
@@ -89,11 +95,11 @@ describe('polish visual and accessibility checks', () => {
         cy.get('#settings-menu .MuiPaper-root').should('have.css', 'opacity', '1');
         cy.screenshot(mode + '-' + width + '-settings', { capture: 'viewport', overwrite: true });
         cy.get('[data-testid="settings-logout"]').click();
-        cy.get('[role="dialog"]').should('be.visible').and('contain', 'Log out');
-        cy.get('[role="dialog"]').should('have.css', 'opacity', '1');
+        cy.get('[role="dialog"][aria-labelledby="logout-title"]').should('be.visible').and('contain', 'Log out');
+        cy.get('[role="dialog"][aria-labelledby="logout-title"]').should('have.css', 'opacity', '1');
         cy.screenshot(mode + '-' + width + '-logout', { capture: 'viewport', overwrite: true });
-        cy.contains('[role="dialog"] button', 'Cancel').click();
-        cy.get('[role="dialog"]').should('not.exist');
+        cy.contains('[role="dialog"][aria-labelledby="logout-title"] button', 'Cancel').click();
+        cy.get('[role="dialog"][aria-labelledby="logout-title"]').should('not.exist');
         cy.contains('[data-testid="post-card"]', 'Building thoughtful').find('[data-testid="comment-button"]').click();
         cy.get('[data-testid="comment"]').should('exist');
         noOverflow();
@@ -164,6 +170,7 @@ describe('polish visual and accessibility checks', () => {
         themeVisit('/', dark);
         cy.get('[data-testid="nav-profile"]').should('exist');
         cy.contains('Posts are temporarily unavailable.').should('be.visible');
+        if (width < 1200) cy.get('[data-testid="mobile-discover-open"]').click();
         cy.contains('Suggestions are unavailable.').should('be.visible');
         shot('error');
       });

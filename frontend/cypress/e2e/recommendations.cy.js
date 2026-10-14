@@ -1,6 +1,7 @@
 // The home page's sidebar: trending tags (the last 24 hours) and who to follow
 // (friends of friends, then shared tags, then the most followed), on real MySQL.
 describe('home sidebar', () => {
+  beforeEach(() => cy.viewport(1280, 900))
   const api = (route) => `${Cypress.env('apiBaseUrl')}${route}`
   const suggested = (username) => cy.get(`[data-testid="suggested-user"][data-username="${username}"]`)
 
