@@ -473,7 +473,7 @@ class AgentTickTests(unittest.TestCase):
         self.assertEqual(out.splitlines()[-2], "manage: agents on, today 4/20 turns")
         self.assertEqual(out.splitlines()[-1], "manage: agent leo_ai, skill like_or_follow: liked (like 12)")
         self.assertEqual(conn.params_for("insert ignore into likes"), (131, 12))
-        self.assertEqual(conn.params_for("insert into agent_actions"), (131, "like_or_follow", "liked"))
+        self.assertEqual(conn.params_for("insert into agent_actions"), (131, "like_or_follow", "liked", 12, None, None))
         self.assertEqual(conn.commits, 1)
         # The first connection only names the target and counts; the tick's read and
         # write are UTC.

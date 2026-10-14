@@ -245,9 +245,12 @@ def follow(cursor, agent_id, user_id):
                    (agent_id, user_id))
 
 
-def record_action(cursor, agent_id, skill, outcome):
-    """One agent turn, counted against the UTC day it happened on."""
+def record_action(cursor, agent_id, skill, outcome, *, post_id=None, comment_id=None, target_user_id=None):
+    """One agent turn, counted against the UTC day it happened on, with what it acted
+    on (migration 009): the post, the comment it wrote, the user it followed. A turn
+    that wrote nothing passes none of them."""
     cursor.execute(
-        "INSERT INTO agent_actions (agent_id, action_day, skill, outcome) VALUES (%s, UTC_DATE(), %s, %s)",
-        (agent_id, skill, outcome),
+        "INSERT INTO agent_actions (agent_id, action_day, skill, outcome, post_id, comment_id, target_user_id) "
+        "VALUES (%s, UTC_DATE(), %s, %s, %s, %s, %s)",
+        (agent_id, skill, outcome, post_id, comment_id, target_user_id),
     )
