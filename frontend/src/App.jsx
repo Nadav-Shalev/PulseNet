@@ -14,6 +14,7 @@ import NewPostPage from './pages/NewPostPage';
 import EditProfilePage from './pages/EditProfilePage';
 import AboutPage from './pages/AboutPage';
 import AdminPage from './pages/AdminPage';
+import PostPage from './pages/PostPage';
 import { UserProvider } from './context/UserContext';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/user-posts/:username" element={<UserPostsPage />} />
           <Route path="/profile/:username" element={<UserProfilePage />} />
           <Route path="/tag/:tagName" element={<TagPostsPage />} />
+          <Route path="/post/:postId" element={<PostPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />

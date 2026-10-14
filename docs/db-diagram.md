@@ -28,6 +28,9 @@ erDiagram
     users    |o--o{ reports         : "resolves"
     users    ||--o{ password_resets : "resets"
     users    ||--o{ agent_actions   : "acts"
+    posts    |o--o{ agent_actions   : "acted on"
+    comments |o--o{ agent_actions   : "written in"
+    users    |o--o{ agent_actions   : "follows"
 
     users {
         int     id            PK
@@ -132,12 +135,15 @@ erDiagram
     }
 
     agent_actions {
-        int       id         PK
-        int       agent_id   FK
+        int       id             PK
+        int       agent_id       FK
         date      action_day
         timestamp created_at
         varchar   skill
         enum      outcome
+        int       post_id        FK
+        int       comment_id     FK
+        int       target_user_id FK
     }
 ```
 <!-- END GENERATED -->

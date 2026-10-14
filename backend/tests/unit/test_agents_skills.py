@@ -532,11 +532,14 @@ class TriggerSqlTests(unittest.TestCase):
     def test_a_turn_is_logged_on_the_utc_day(self):
         conn = FakeConn()
 
-        store.record_action(conn.cursor(), 131, "like_or_follow", "liked")
+        store.record_action(conn.cursor(), 131, "like_or_follow", "liked", post_id=12)
+        store.record_action(conn.cursor(), 131, "comment_trending", "llm_failed")
 
-        sql, params = conn.find("insert into agent_actions")[0]
+        (sql, params), (_sql, failed) = conn.find("insert into agent_actions")
         self.assertIn("UTC_DATE()", sql)
-        self.assertEqual(params, (131, "like_or_follow", "liked"))
+        self.assertIn("(agent_id, action_day, skill, outcome, post_id, comment_id, target_user_id)", sql)
+        self.assertEqual(params, (131, "like_or_follow", "liked", 12, None, None))
+        self.assertEqual(failed, (131, "comment_trending", "llm_failed", None, None, None))
 
     def test_a_named_agent_is_looked_up_with_the_same_filter(self):
         conn = FakeConn(fetchone=[None])

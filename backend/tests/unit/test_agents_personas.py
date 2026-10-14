@@ -1,6 +1,6 @@
 """The agents' fixed data: personas.py against migration 007, the turn outcomes
-against migration 008 and schema.sql, and the agents' limits and llm_usage purposes
-against the rest of the backend."""
+against migration 008 and schema.sql, a turn's links to its target (009), and the
+agents' limits and llm_usage purposes against the rest of the backend."""
 
 import re
 import sys
@@ -87,6 +87,32 @@ class TurnOutcomeTests(unittest.TestCase):
 
     def test_a_tick_that_tried_nothing_is_not_a_turn(self):
         self.assertEqual(set(OUTCOMES) - set(RECORDED), {"idle", "no_agent", "dry_run", "capped"})
+
+
+class ActionTargetTests(unittest.TestCase):
+    """009 links a turn to what it acted on. The links are nullable (failed turns and
+    those before 009 have none) and SET NULL: deleting the target keeps the turn."""
+
+    TARGETS = {"post_id": "posts", "comment_id": "comments", "target_user_id": "users"}
+
+    def test_the_migration_adds_nullable_set_null_links(self):
+        sql = (DATABASE_DIR / "migrations" / "009_agent_action_targets.sql").read_text(encoding="utf-8")
+        statement = sql[sql.index("ALTER TABLE agent_actions"):]
+        for column, parent in self.TARGETS.items():
+            with self.subTest(column=column):
+                self.assertRegex(statement, rf"ADD COLUMN {column}\s+INT,")
+                self.assertRegex(statement, rf"ADD FOREIGN KEY \({column}\)\s+REFERENCES {parent}\(id\)"
+                                            r"\s+ON DELETE SET NULL")
+        # MySQL refuses a CHECK on a SET NULL column (3823).
+        self.assertNotIn("CHECK", statement)
+
+    def test_schema_sql_has_the_same_links(self):
+        sql = (DATABASE_DIR / "schema.sql").read_text(encoding="utf-8")
+        table = re.search(r"CREATE TABLE IF NOT EXISTS agent_actions \((.*?)\n\);", sql, re.S).group(1)
+        for column, parent in self.TARGETS.items():
+            with self.subTest(column=column):
+                self.assertRegex(table, rf"\n\s+{column}\s+INT,")
+                self.assertRegex(table, rf"FOREIGN KEY \({column}\)\s+REFERENCES {parent}\(id\)\s+ON DELETE SET NULL")
 
 
 class LimitTests(unittest.TestCase):

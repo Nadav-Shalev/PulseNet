@@ -95,7 +95,9 @@ class ReplyTests(TickTestCase):
         self.assertEqual(closed_at_call, [True, True])     # the read connection closed before the LLM
         self.assertEqual(self.write.params_for("insert into comments"),
                          (7, 131, 40, "Thanks, Ada! Hooks keep state next to the code that uses it."))
-        self.assertEqual(self.write.params_for("insert into agent_actions"), (131, "reply_to_human", "replied"))
+        # The turn links the post and the new reply (comment 90), not the comment it answers.
+        self.assertEqual(self.write.params_for("insert into agent_actions"),
+                         (131, "reply_to_human", "replied", 7, 90, None))
         self.assertEqual((self.write.commits, self.write.closed), (1, True))
         self.assertEqual(self.purposes(), [("agent_reply_human", 131, "ok"), ("moderation", 131, "ok")])
         prompt, system = self.service.provider.calls[0]
@@ -128,6 +130,9 @@ class CommentAndPostTests(TickTestCase):
         self.assertEqual((result.skill, result.outcome), ("comment_trending", "commented"))
         self.assertEqual(result.detail, {"post_id": 9, "comment_id": 90})      # the fresher one
         self.assertIsNone(self.write.params_for("insert into comments")[2])     # top-level
+        # The turn links the post it commented on and the new comment.
+        self.assertEqual(self.write.params_for("insert into agent_actions"),
+                         (131, "comment_trending", "commented", 9, 90, None))
         # Choosing the post took no LLM call: one to write, one to moderate.
         self.assertEqual(self.purposes(), [("agent_comment", 131, "ok"), ("moderation", 131, "ok")])
         self.assertIn("<post_title>\nCSS grid\n</post_title>", self.service.provider.calls[0][0])
@@ -157,6 +162,7 @@ class CommentAndPostTests(TickTestCase):
         self.assertEqual(params[:2], (131, "Five CSS tricks"))
         self.assertIn("<strong>grid</strong>", params[3])
         self.assertEqual([p for _, p in write.find("insert ignore into posts_tags")], [(77, 5), (77, 6)])
+        self.assertEqual(write.params_for("insert into agent_actions"), (131, "write_post", "posted", 77, None, None))
         self.assertEqual(self.purposes(), [("agent_post", 131, "ok"), ("moderation", 131, "ok")])
         # The post is moderated as a post: title, tags and its visible text.
         moderation_prompt = self.service.provider.calls[1][0]
@@ -202,7 +208,8 @@ class CommentAndPostTests(TickTestCase):
             self.assertNotIn(text, logs.output[0])
         self.assertEqual(self.purposes(), [("agent_post", 131, "ok")])     # not moderated
         self.assertFalse(self.write.ran("insert into posts"))
-        self.assertEqual(self.write.params_for("insert into agent_actions"), (131, "write_post", "bad_reply"))
+        self.assertEqual(self.write.params_for("insert into agent_actions"),
+                         (131, "write_post", "bad_reply", None, None, None))
 
     def test_a_post_tagged_with_numbers_is_stored_with_its_hashtags(self):
         # Production post 38 (2026-10-11), reconstructed: "tags" ["1", "3", "5"] and a
@@ -243,7 +250,8 @@ class LikeFollowTests(TickTestCase):
 
         self.assertEqual((result.skill, result.outcome, result.detail), ("like_or_follow", "followed", {"follow": 3}))
         self.assertEqual(self.write.params_for("insert ignore into follows"), (131, 3))
-        self.assertEqual(self.write.params_for("insert into agent_actions"), (131, "like_or_follow", "followed"))
+        self.assertEqual(self.write.params_for("insert into agent_actions"),
+                         (131, "like_or_follow", "followed", None, None, 3))
         self.assertEqual((self.write.commits, self.write.closed), (1, True))
         self.assertEqual(self.service.store.records, [])
 
@@ -258,6 +266,8 @@ class LikeFollowTests(TickTestCase):
 
         self.assertEqual((result.skill, result.outcome, result.detail), ("like_or_follow", "liked", {"like": 12}))
         self.assertEqual(self.write.params_for("insert ignore into likes"), (131, 12))
+        self.assertEqual(self.write.params_for("insert into agent_actions"),
+                         (131, "like_or_follow", "liked", 12, None, None))
         for needle in ("from comments c", "from posts_tags pt", "max(created_at)"):
             with self.subTest(needle=needle):
                 self.assertFalse(read.ran(needle))
@@ -285,7 +295,7 @@ class NothingWrittenTests(TickTestCase):
     def assertOnlyTheTurn(self, outcome):
         self.assertEqual(self.opened, 2)
         self.assertEqual([params for _, params in self.write.executed],
-                         [(131, "reply_to_human", outcome)])
+                         [(131, "reply_to_human", outcome, None, None, None)])     # no target
         self.assertTrue(self.write.ran("insert into agent_actions"))
         self.assertEqual((self.write.commits, self.write.closed), (1, True))
 
@@ -351,10 +361,37 @@ class NothingWrittenTests(TickTestCase):
         self.assertEqual(result.outcome, "target_gone")
         # Rolled back, then the turn alone, committed.
         self.assertEqual((write.commits, write.rollbacks, write.closed), (1, 1, True))
-        self.assertEqual(write.params_for("insert into agent_actions"), (131, "reply_to_human", "target_gone"))
+        # No target: it may be the row that is gone.
+        self.assertEqual(write.params_for("insert into agent_actions"),
+                         (131, "reply_to_human", "target_gone", None, None, None))
         sqls = [" ".join(sql.split()).lower() for sql, _ in write.executed]
         self.assertTrue(sqls[0].startswith("insert into comments"))
         self.assertTrue(sqls[1].startswith("insert into agent_actions"))
+
+    def test_a_like_or_follow_whose_target_was_deleted_meanwhile(self):
+        # INSERT IGNORE skips a post or user deleted since the read (MySQL makes the
+        # 1452 a warning), but the turn's own link to it fails: target_gone, not a
+        # turn that claims a like or a follow nobody stored.
+        class LinkFailsUntilRollback(FakeConn):
+            def rollback(self):
+                super().rollback()
+                self.raise_on.clear()
+
+        cases = (("like", [[], [{"id": 12}]], (12, None, None)),
+                 ("follow", [[{"author_id": 3}]], (None, None, 3)))
+        for kind, reads, target in cases:
+            with self.subTest(kind=kind):
+                write = LinkFailsUntilRollback(raise_on={"insert into agent_actions": FkError(1452)})
+                connect = self.connections(FakeConn(fetchall=[[AGENT_ROW], *reads]), write)
+
+                result = self.tick(connect, service=None)
+
+                self.assertEqual((result.outcome, result.detail), ("target_gone", {kind: target[0] or target[2]}))
+                self.assertEqual((write.commits, write.rollbacks, write.closed), (1, 1, True))
+                outcome = "liked" if kind == "like" else "followed"
+                self.assertEqual([params for _, params in write.find("insert into agent_actions")],
+                                 [(131, "like_or_follow", outcome, *target),
+                                  (131, "like_or_follow", "target_gone", None, None, None)])
 
     def test_any_other_db_error_is_raised_and_the_connection_closed(self):
         write = FakeConn(raise_on={"insert into comments": FkError(1205)})
@@ -428,7 +465,8 @@ class TurnOrderTests(TickTestCase):
         result = self.tick(connect, service=None)
 
         self.assertEqual((result.agent, result.outcome, result.detail), ("dana_ai", "liked", {"like": 12}))
-        self.assertEqual(self.write.params_for("insert into agent_actions"), (133, "like_or_follow", "liked"))
+        self.assertEqual(self.write.params_for("insert into agent_actions"),
+                         (133, "like_or_follow", "liked", 12, None, None))
         self.assertTrue(read.ran("order by max(a.id) is not null, max(a.id), u.id"))
 
     def test_an_agent_with_nothing_to_do_lets_the_next_one_act(self):
@@ -443,7 +481,7 @@ class TurnOrderTests(TickTestCase):
         like_reads = [params for _, params in read.find("from posts p join users u")]
         self.assertEqual([params[0] for params in like_reads], [133, 131])
         self.assertEqual([params for _, params in self.write.find("insert into agent_actions")],
-                         [(131, "like_or_follow", "liked")])
+                         [(131, "like_or_follow", "liked", 14, None, None)])
 
     def test_idle_only_when_no_agent_finds_anything(self):
         read = FakeConn(fetchall=[[DANA_ROW, AGENT_ROW]])
@@ -696,7 +734,7 @@ class World:
     def actions_today(self, _cursor):
         return len(self.turns)
 
-    def record_action(self, _cursor, agent_id, skill, outcome):
+    def record_action(self, _cursor, agent_id, skill, outcome, **_target):
         self.turns.append((agent_id, skill, outcome, self.now))
         if self.replies:
             if skill.startswith("reply_"):

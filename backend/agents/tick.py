@@ -23,7 +23,8 @@
    in the meantime (MySQL 1452, a foreign key) is the outcome target_gone.
 
 Every turn (an outcome in RECORDED) is one agent_actions row: in the same commit as
-the write, or on a short connection of its own when nothing was written. So a turn
+the write, with the post, the new comment or the followed user it acted on (009), or
+on a short connection of its own, with no target, when nothing was written. So a turn
 that failed still sends its agent to the back of the queue and counts against the
 cap: its LLM calls were already spent. idle, dry_run, capped and no_agent are not
 turns, and leave no row.
@@ -84,8 +85,9 @@ def run_tick(service, moderator, connect, *, rng=None, agent=None, dry_run=False
         kind, target_id = found
         if dry_run:
             return _done(me, skill, "dry_run", {kind: target_id})
+        target = {"target_user_id": target_id} if kind == "follow" else {"post_id": target_id}
         return _act(connect, me, skill, lambda cursor: _like_or_follow(cursor, me, kind, target_id),
-                    "followed" if kind == "follow" else "liked", {kind: target_id})
+                    "followed" if kind == "follow" else "liked", {kind: target_id}, target)
 
     prompt, system = skill.build(me, found)
     sizes = {"prompt_chars": len(prompt) + len(system)}
@@ -110,8 +112,10 @@ def run_tick(service, moderator, connect, *, rng=None, agent=None, dry_run=False
     if verdict.blocked:
         return _failed(connect, me, skill, "blocked", {**_ids(found), "category": verdict.category})
 
+    # A comment or a reply acts on the post it goes to; _write adds the new id.
+    target = {"post_id": found["post_id"]} if isinstance(content, Comment) else {}
     return _act(connect, me, skill, lambda cursor: _write(cursor, me, found, content),
-                _DONE[skill.name], _ids(found))
+                _DONE[skill.name], _ids(found), target)
 
 
 def _choose(service, connect, rng, username, max_actions):
@@ -146,15 +150,18 @@ def _choose(service, connect, rng, username, max_actions):
         conn.close()
 
 
-def _act(connect, me, skill, write, outcome, detail):
-    """Run ``write(cursor)`` and log the turn in a new connection, in one commit;
-    1452 -> target_gone (rolled back, then logged)."""
+def _act(connect, me, skill, write, outcome, detail, target):
+    """Run ``write(cursor)`` and log the turn in a new connection, in one commit,
+    with what it acted on: ``target`` and the ids ``write`` returns (a new post or
+    comment). 1452 -> target_gone (rolled back, then logged without a target, which
+    may be the row that is gone). That covers a like or a follow too: their INSERT
+    IGNORE skips a missing post or user, but the turn's own link to it does not."""
     conn = connect()
     try:
         cursor = conn.cursor()
         try:
             new_ids = write(cursor) or {}
-            store.record_action(cursor, me.id, skill.name, outcome)
+            store.record_action(cursor, me.id, skill.name, outcome, **target, **new_ids)
             conn.commit()
         except Exception as exc:
             if getattr(exc, "errno", None) != FK_TARGET_MISSING:
