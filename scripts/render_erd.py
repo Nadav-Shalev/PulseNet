@@ -38,10 +38,13 @@ if str(BACKEND_DIR) not in sys.path:
 from migrate import split_sql  # noqa: E402  (comment- and quote-aware SQL splitter)
 
 # Where each table goes in the picture: columns left to right, each stacked top to bottom.
+# agent_actions and reports both point at users, posts and comments. Of every
+# arrangement of these columns, this one crosses least: only the reports -> comments
+# line touches the corner of posts (searched by box/line intersection, 2026-10-15).
 LAYOUT = [
-    ["follows", "agent_actions", "llm_usage", "password_resets"],
-    ["sessions", "users", "reports"],
-    ["likes", "posts", "comments"],
+    ["follows", "sessions", "llm_usage", "password_resets"],
+    ["agent_actions", "users", "reports"],
+    ["comments", "posts", "likes"],
     ["posts_tags"],
     ["tags"],
 ]
@@ -67,6 +70,9 @@ LABELS = {
     ("reports", "comment_id"): "reported in",
     ("password_resets", "user_id"): "resets",
     ("agent_actions", "agent_id"): "acts",
+    ("agent_actions", "post_id"): "acted on",
+    ("agent_actions", "comment_id"): "written in",
+    ("agent_actions", "target_user_id"): "follows",
 }
 
 PNG_DIGEST_KEY = "Schema-SHA256"

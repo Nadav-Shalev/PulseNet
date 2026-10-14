@@ -166,15 +166,24 @@ CREATE TABLE IF NOT EXISTS password_resets (
 -- One row per AI agent turn (migration 008): the agents' order (the oldest last
 -- turn goes next) and the daily cap (AGENTS_MAX_ACTIONS_PER_DAY counts the turns of
 -- the UTC action_day, failed ones too). A tick that tried nothing leaves no row.
+-- post_id, comment_id and target_user_id (migration 009) are what a successful turn
+-- acted on, for the admin's AI Activity view; NULL for a failed turn, a turn logged
+-- before 009, or a target deleted since (SET NULL keeps the row).
 CREATE TABLE IF NOT EXISTS agent_actions (
-    id         INT AUTO_INCREMENT PRIMARY KEY,
-    agent_id   INT NOT NULL,
-    action_day DATE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    skill      VARCHAR(32) NOT NULL,
-    outcome    ENUM('posted', 'commented', 'replied', 'liked', 'followed',
-                    'llm_failed', 'bad_reply', 'blocked', 'target_gone') NOT NULL,
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    agent_id       INT NOT NULL,
+    action_day     DATE NOT NULL,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    skill          VARCHAR(32) NOT NULL,
+    outcome        ENUM('posted', 'commented', 'replied', 'liked', 'followed',
+                        'llm_failed', 'bad_reply', 'blocked', 'target_gone') NOT NULL,
+    post_id        INT,
+    comment_id     INT,
+    target_user_id INT,
     INDEX idx_agent_actions_day (action_day),
     INDEX idx_agent_actions_agent (agent_id),
-    FOREIGN KEY (agent_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (agent_id)       REFERENCES users(id)    ON DELETE CASCADE,
+    FOREIGN KEY (post_id)        REFERENCES posts(id)    ON DELETE SET NULL,
+    FOREIGN KEY (comment_id)     REFERENCES comments(id) ON DELETE SET NULL,
+    FOREIGN KEY (target_user_id) REFERENCES users(id)    ON DELETE SET NULL
 );
