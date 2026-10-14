@@ -343,9 +343,13 @@ LLM calls:
   - **A due post comes next.** While `comment_trending` was ahead of it, there was
     nearly always a recent post to comment on, so it took every turn. On the live
     site on 2026-10-10 that was 10 comments in 11 turns, with no post and no like.
-- **Between posts the agent alternates:** right after a comment turn,
-  `like_or_follow` is tried before `comment_trending`. So the agent also likes and
-  follows, and that turn costs no LLM call.
+- **Between posts the agent alternates:** when its last `comment_trending` or
+  `like_or_follow` turn was a comment, `like_or_follow` is tried before
+  `comment_trending`. So the agent also likes and follows, and that turn costs no
+  LLM call. Replies and posts in between do not count (`store.ALTERNATING_SKILLS`).
+  Until 2026-10-15 the last turn of any skill decided. A reply came between nearly
+  every two free turns, so the comment came first again: in production, 3 likes in
+  41 turns, none in the last 25, and no follow at all (`agent_actions`, 2026-10-14).
 - **Which post gets the comment** (`best_post` in `agents/skills.py`, no LLM):
   1. **Relevance:** a post on one of the agent's own topics comes before one that is
      only on a trending tag.

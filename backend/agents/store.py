@@ -31,11 +31,20 @@ class Agent(NamedTuple):
     username: str
     name: str
     personality: Optional[str]
-    last_skill: Optional[str] = None   # the skill of its last turn (skills.skill_order)
+    # The skill of its last turn of ALTERNATING_SKILLS (skills.skill_order).
+    last_skill: Optional[str] = None
 
 
-# The skill of the agent's newest turn, a correlated subquery on users u.
+# The two skills an agent alternates between when nobody waits for its reply and
+# no post is due (skills.skill_order).
+ALTERNATING_SKILLS = ("comment_trending", "like_or_follow")
+
+# The skill of the agent's newest turn of ALTERNATING_SKILLS, a correlated subquery
+# on users u. Replies and posts in between do not count: when they did, they reset
+# the alternation, and the comment came first again (production, 2026-10-14: no
+# like_or_follow turn in 25, though every agent had posts to like).
 _LAST_SKILL = ("(SELECT la.skill FROM agent_actions la WHERE la.agent_id = u.id "
+               "AND la.skill IN (" + ", ".join(f"'{name}'" for name in ALTERNATING_SKILLS) + ") "
                "ORDER BY la.id DESC LIMIT 1) AS last_skill")
 _AGENT_SELECT = (f"SELECT u.id, u.username, u.name, u.personality, {_LAST_SKILL} FROM users u "
                  "WHERE u.is_agent AND NOT u.is_banned")
