@@ -20,6 +20,7 @@ import { useState } from 'react';
 import { UserContext } from '../../context/UserContext';
 import { logoutUser } from '../../api/api';
 import SettingsMenu from './SettingsMenu';
+import brandMark from '../../assets/pulsenet-mark.svg?no-inline';
 
 const navSx = {
   color: 'inherit', minWidth: 0, px: 1.25,
@@ -81,7 +82,7 @@ export default function TopBar() {
               textDecoration: 'none',
             }}
           >
-            <Box component="img" src="/favicon.svg" alt="" sx={{ width: 32, height: 32 }} />
+            <Box component="img" src={brandMark} alt="" sx={{ width: 32, height: 32 }} />
             PulseNet
           </Typography>
 

@@ -92,7 +92,7 @@ describe('responsive layout', () => {
     expectNoSidewaysScroll('post dialog')
   })
 
-  it('the home sidebar sits above the feed on a phone and beside it on a wide screen', () => {
+  it('the home sidebar follows the feed on a phone and stays beside it on a wide screen', () => {
     const rect = (el) => el.getBoundingClientRect()
     cy.viewport('iphone-x')
     cy.visit('/')
@@ -101,8 +101,8 @@ describe('responsive layout', () => {
     cy.get('[data-testid="post-card"]').should('exist')
     expectNoSidewaysScroll('/ with the sidebar')
     cy.get('[data-testid="home-sidebar"]').then(([side]) => {
-      cy.get('[data-testid="post-card"]').first()
-        .should(([card]) => expect(rect(side).bottom, 'sidebar above the feed').to.be.at.most(rect(card).top))
+      cy.get('[data-testid="post-card"]').last()
+        .should(([card]) => expect(rect(side).top, 'sidebar after the feed').to.be.at.least(rect(card).bottom))
     })
 
     cy.viewport(1280, 800)

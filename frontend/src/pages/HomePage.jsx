@@ -21,9 +21,9 @@ function HomePage() {
       sx={{
         display: 'grid',
         // From lg (1200px) the sidebar is a column beside the feed; below that it
-        // sits between the tabs and the feed.
+        // follows the feed in both visual and keyboard order.
         gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 1fr) 300px' },
-        gridTemplateAreas: { xs: '"tabs" "side" "feed"', lg: '"tabs side" "feed side"' },
+        gridTemplateAreas: { xs: '"tabs" "feed" "side"', lg: '"tabs side" "feed side"' },
         gridTemplateRows: { lg: 'auto 1fr' },
         columnGap: 3,
         alignItems: 'start',
@@ -37,19 +37,6 @@ function HomePage() {
         </Tabs>
       </Box>
 
-      <Box
-        component="aside"
-        sx={{
-          gridArea: 'side',
-          minWidth: 0,
-          mb: { xs: 2, lg: 0 },
-          position: { lg: 'sticky' },
-          top: { lg: 16 },
-        }}
-      >
-        <HomeSidebar />
-      </Box>
-
       <Box id="feed-panel" role="tabpanel" aria-labelledby={`feed-${activeTab}-tab`} sx={{ gridArea: 'feed', minWidth: 0 }}>
         {activeTab === 'following' ? (
           <Feed
@@ -59,6 +46,19 @@ function HomePage() {
         ) : (
           <Feed />
         )}
+      </Box>
+
+      <Box
+        component="aside"
+        sx={{
+          gridArea: 'side',
+          minWidth: 0,
+          mt: { xs: 2, lg: 0 },
+          position: { lg: 'sticky' },
+          top: { lg: 16 },
+        }}
+      >
+        <HomeSidebar />
       </Box>
     </Box>
   );

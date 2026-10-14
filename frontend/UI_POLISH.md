@@ -76,6 +76,28 @@ Manual visual review completed for **114 browser captures across 19 screens/stat
 
 Logs: `cypress/logs/feed-focused.log`, `cypress/logs/feed-targeted.log`, `cypress/logs/feed-focused-retry.log`, `cypress/logs/feed-full.log`, `cypress/logs/feed-final-preview.log`, and `cypress/logs/feed-final-checks.log`.
 
+## Final mobile polish (2026-10-11)
+
+Baseline: **94 Cypress tests across 21 specs**, at `fbbb38c`.
+
+- Home puts the feed before Trending / Who to Follow below the existing 1200px sidebar breakpoint. The DOM order now matches the mobile reading/tab order; desktop retains its existing right-hand sticky sidebar and column widths. Loading, empty, error, and retry feedback stay before discovery.
+- The same pulse SVG now lives in `src/assets/pulsenet-mark.svg`, has explicit 32px intrinsic dimensions, and is imported through Vite by the TopBar and favicon. The production build emits one fingerprinted SVG URL for both, rather than relying on the root `/favicon.svg` path. The local production response is HTTP 200 with `image/svg+xml`, and image decoding works on nested routes and reload.
+- Replaced the fixed-height crop and fade with a native three-line clamp. Local measurement uses the actual clamped height and overflow, so paragraph spacing, line breaks, headings, and lists end on complete text rows. The HTML remains intact, Read More / Read Less stays inline, and the existing local observers, request reuse, clipped-link keyboard behavior, and focus handling remain.
+- Mobile rich-text h1/h2/h3 sizes are bounded at 1.4rem / 1.2rem / 1.05rem below 600px, including Comments. Desktop heading typography is unchanged.
+- Who to Follow retains three suggestions and all follow/replacement behavior. Only phone padding, row gaps, and avatar size are slightly reduced; buttons retain their existing size.
+
+Intentional existing-test updates: the two sidebar placement checks now expect discovery below the mobile feed; the previous fixed-height preview assertion now checks three-line clamping, supported by new rendered-text geometry assertions. No existing test cases or behavior checks were removed. The seven new cases in `mobile_polish.cy.js` cover reading/DOM order, both themes with six rich-text samples and complete-line checks, heading bounds, logo/favicon production delivery, and loading/empty/error/retry order.
+
+Targeted development checks: all **19 existing affected tests passed** (4 responsive, 15 feed). The initial new-spec run passed 5/7; two assertions used an unprefixed CSS mask property unavailable in Cypress's bundled Electron 118. The test now checks either supported property without relaxing the expected absence of a mask. The focused rerun passed **7/7**, with 0 failures, pending, or skips. Final frontend lint and production build passed.
+
+Additional production-browser verification used already-installed WebKit and Chromium, without adding dependencies. All **12 browser/theme/viewport combinations** passed at **375/768/1280px × light/dark**: SVG decode and matching favicon, complete three-line previews for paragraphs/headings/lists/code blocks, inline expansion/collapse, sidebar placement, and no horizontal overflow. **48 final browser captures** were manually reviewed. This is local WebKit verification, not a physical iPhone test. The previously reported broken image did not reproduce in the old local WebKit build, so its device-specific root cause is unconfirmed; the new bundled path, explicit dimensions, and production decoding are verified.
+
+The single full regression passed **101/101 tests across 22 specs in 4m 01s**: **94 existing tests passed (including the original 45), 7 new tests passed, 0 failures, 0 pending, 0 skipped**. Existing auth, Settings/theme, keyboard, accessibility-related visual checks, comments, and interaction coverage passed. No tests were removed, skipped, or made exclusive.
+
+An additional production-browser code-block check found a Chromium edge case while the full run was in progress: a scrolling `pre` creates an independent formatting context and can escape the clamp. The final local fix lets code lines participate in the collapsed preview and removes its bottom padding so a fourth row cannot leak through; expanding restores normal code-block scrolling/padding. Measurement temporarily applies the collapsed attributes and restores them before painting, without reconstructing HTML. The new rich-text cases now include multiline code. The full run above predates this last edge-case fix; only affected checks are rerun afterward, preserving the one-full-run limit. The final source passed **26/26 affected Cypress tests in 29s** (7 mobile, 4 responsive, 15 feed), with **0 failures, 0 pending, 0 skipped**. Final lint/build and all 12 WebKit/Chromium viewport/theme combinations also passed after that fix. The existing bundle-size warning remains a deferred follow-up.
+
+Logs: `cypress/logs/mobile-targeted.log`, `cypress/logs/mobile-focused-retry.log`, `cypress/logs/mobile-full.log`, `cypress/logs/mobile-final-targeted.log`, `cypress/logs/mobile-code-final.log`, and `cypress/logs/mobile-verified.log`. Temporary browser captures are under `%TEMP%/pulsenet-mobile-review/`. No backend, API, deployment, dependency, route, auth, Settings, or testid changes.
+
 ## Post-submission follow-ups
 
 - Defer popular/most-traffic posts: existing paginated data has likes/comments but no traffic metric or complete ranking. Do not present a partial-page sort as a site-wide popularity feature.

@@ -57,6 +57,11 @@ export default function AppTheme({ children }) {
           '& pre': { overflowX: 'auto', padding: 16, background: t.palette.action.hover, borderRadius: 8 },
           '& code': { fontFamily: 'ui-monospace, Consolas, monospace', fontSize: '0.9em' },
           '& h1, & h2, & h3': { lineHeight: 1.3, margin: '1em 0 0.5em' },
+          [t.breakpoints.down('sm')]: {
+            '& h1': { fontSize: '1.4rem' },
+            '& h2': { fontSize: '1.2rem' },
+            '& h3': { fontSize: '1.05rem' },
+          },
         },
         '.ql-toolbar.ql-snow, .ql-container.ql-snow': { borderColor: t.palette.divider },
         '.ql-snow .ql-stroke': { stroke: t.palette.text.primary },
