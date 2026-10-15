@@ -28,7 +28,7 @@ function threeCleanLines(content) {
 
 describe('final mobile polish', () => {
   [375, 768].forEach(width => {
-    it('puts posts before discovery in visual and DOM order at ' + width + 'px', () => {
+    it('keeps discovery in a drawer at ' + width + 'px', () => {
       cy.viewport(width, 812);
       mockShell(viewer);
       cy.intercept({ method: 'GET', pathname: '/api/articles' }, [article(1), article(2)]);
@@ -38,19 +38,17 @@ describe('final mobile polish', () => {
       cy.get('[data-testid="post-card"]').first().should(([post]) => {
         expect(post.getBoundingClientRect().top, 'first post is in initial viewport').to.be.lessThan(400);
       });
-      cy.get('[data-testid="home-sidebar"]').should(([side]) => {
-        const panel = side.ownerDocument.getElementById('feed-panel');
-        expect(side.getBoundingClientRect().top).to.be.at.least(panel.getBoundingClientRect().bottom - 1);
-        expect(panel.compareDocumentPosition(side) & 4, 'feed precedes discovery in DOM').to.equal(4);
-      });
+      cy.get('.App-feed [data-testid="home-sidebar"]').should('not.exist');
+      cy.get('[data-testid="mobile-discover-open"]').should('be.visible').click();
+      cy.get('[data-testid="mobile-discover-drawer"]').should('be.visible')
+        .find('[data-testid="home-sidebar"]').should('have.length', 1);
       cy.get('[data-testid="suggested-user"]').should('have.length', 3);
       cy.get('[data-testid="suggested-follow"]').first().should('be.enabled');
       cy.document().should(doc => expect(doc.documentElement.scrollWidth).to.be.at.most(doc.documentElement.clientWidth));
+      cy.get('[aria-label="Close discovery"]').click();
       cy.contains('[role="tab"]', 'Following').click();
       cy.get('[data-testid="post-card"]').first().should('exist');
-      cy.get('[data-testid="home-sidebar"]').should(([side]) => {
-        expect(side.getBoundingClientRect().top).to.be.at.least(side.ownerDocument.getElementById('feed-panel').getBoundingClientRect().bottom - 1);
-      });
+      cy.get('.App-feed [data-testid="home-sidebar"]').should('not.exist');
     });
   });
 
@@ -136,10 +134,11 @@ describe('final mobile polish', () => {
     mockShell(viewer);
     cy.intercept({ method: 'GET', pathname: '/api/articles' }, { delay: 700, body: [] });
     cy.visit('/');
-    const beforeSide = selector => cy.get(selector).should(([state]) => {
-      const side = state.ownerDocument.querySelector('[data-testid="home-sidebar"]');
-      expect(state.getBoundingClientRect().bottom).to.be.at.most(side.getBoundingClientRect().top);
-    });
+    const beforeSide = selector => {
+      cy.get(selector).should('be.visible');
+      cy.get('.App-feed [data-testid="home-sidebar"]').should('not.exist');
+      cy.get('[data-testid="mobile-discover-open"]').should('be.visible');
+    };
     beforeSide('#feed-panel [aria-label="Loading posts"]');
     cy.contains('No posts yet.').should('be.visible');
     beforeSide('#feed-panel');

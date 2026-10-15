@@ -92,18 +92,16 @@ describe('responsive layout', () => {
     expectNoSidewaysScroll('post dialog')
   })
 
-  it('the home sidebar follows the feed on a phone and stays beside it on a wide screen', () => {
+  it('discovery opens in a drawer on a phone and stays beside the feed on a wide screen', () => {
     const rect = (el) => el.getBoundingClientRect()
     cy.viewport('iphone-x')
     cy.visit('/')
-    // The sidebar loads on its own: wait for it and for the feed.
-    cy.get('[data-testid="trending-tag"]').should('exist')
     cy.get('[data-testid="post-card"]').should('exist')
-    expectNoSidewaysScroll('/ with the sidebar')
-    cy.get('[data-testid="home-sidebar"]').then(([side]) => {
-      cy.get('[data-testid="post-card"]').last()
-        .should(([card]) => expect(rect(side).top, 'sidebar after the feed').to.be.at.least(rect(card).bottom))
-    })
+    cy.get('.App-feed [data-testid="home-sidebar"]').should('not.exist')
+    cy.get('[data-testid="mobile-discover-open"]').click()
+    cy.get('[data-testid="mobile-discover-drawer"]').should('be.visible')
+      .find('[data-testid="trending-tag"]').should('exist')
+    expectNoSidewaysScroll('/ with discovery open')
 
     cy.viewport(1280, 800)
     cy.get('[data-testid="home-sidebar"]').then(([side]) => {

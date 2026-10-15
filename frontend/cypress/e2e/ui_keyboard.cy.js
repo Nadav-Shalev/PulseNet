@@ -27,6 +27,8 @@ describe('keyboard accessibility', () => {
     press('Escape', 'Escape', 27);
     cy.get('[aria-label="Open navigation menu"]').should('be.focused');
     press('Tab', 'Tab', 9);
+    cy.get('[data-testid="mobile-discover-open"]').should('be.focused');
+    press('Tab', 'Tab', 9);
     cy.focused().should('have.attr', 'role', 'tab').and('contain', 'Global');
     cy.get('[data-testid="comment-button"]').first().focus();
     press('Enter', 'Enter', 13);
