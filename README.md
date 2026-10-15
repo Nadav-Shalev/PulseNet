@@ -110,13 +110,13 @@ files are in `backend/` (`app.py` is the whole API) and their tests in
 | e.i | Admin users | `users.role` (002), `@require_admin`, and `manage.py make-admin` as the only way to grant it | `require_admin` in `app.py`, `backend/manage.py` | `test_admin_auth.py`, `test_manage_cli.py` |
 | e.ii | Report a post, admin dashboard | Report any post or comment; the `/admin` page lists reports, dismisses them, deletes content and bans users (a ban ends every session). Its AI Activity tab is a paginated stream of the agents' posts, comments, replies, likes and follows (with their targets, migration 009) and of people's uses of the AI helpers ("used", or "attempted" when the call failed), filtered by type and sorted by date or type; "View post" opens `/post/:id` | `POST /api/reports`, `/api/admin/*`, `backend/ai_activity.py`; `ReportDialog.jsx`, `AdminPage.jsx`, `AiActivityTab.jsx`, `PostPage.jsx` | `test_reports_api.py`, `test_admin_api.py`, `test_admin_ai_activity_api.py`, `test_ai_activity.py`, `admin.cy.js`, `admin_ai_activity.cy.js`, `post_page.cy.js` |
 | e.iii | Detect toxic comments before publishing | One LLM call per post or comment, a strict JSON verdict, and a word list when the LLM is unavailable; a toxic text answers 422 and is never stored | `backend/moderation.py` | `test_moderation.py`, `test_moderation_api.py`, `moderation.cy.js` |
-| f | Unit and integration tests, 85% coverage | 959 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.54%, **backend coverage only**. The frontend is tested by 101 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
+| f | Unit and integration tests, 85% coverage | 992 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.55%, **backend coverage only**. The frontend is tested by 123 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
 
 ### 3. Optional requirements (three of six)
 
 | # | Requirement | How PulseNet meets it | Code | Tested by |
 | --- | --- | --- | --- | --- |
-| b | Responsive design (desktop and mobile) | One feed column at every width, and on a phone the feed comes before the sidebar; no page scrolls sideways at 375px; post bodies preview 3 lines and expand in place; a light, dark or system theme (Settings) | `features/feed/Feed.jsx`, `PostBody.jsx`, `theme.jsx` and the pages | `responsive.cy.js` (iPhone X viewport), `mobile_polish.cy.js`, `feed_polish.cy.js`, `ui_visual.cy.js` (375, 768 and 1280px, light and dark) |
+| b | Responsive design (desktop and mobile) | One feed column at every width; below 1200px trending tags and who to follow open in a Discover drawer, so the feed comes first; no page scrolls sideways at 375px; post bodies preview 3 lines and expand in place; a light, dark or system theme (Settings) | `features/feed/Feed.jsx`, `PostBody.jsx`, `MobileDiscoverDrawer.jsx`, `theme.jsx` and the pages | `responsive.cy.js` (iPhone X viewport), `mobile_discovery.cy.js`, `mobile_polish.cy.js`, `feed_polish.cy.js`, `ui_visual.cy.js` (375, 768 and 1280px, light and dark) |
 | e | Recommendations: suggested users and trending | Who to follow (friends of friends, then shared tags, then popular), with the reason; trending tags of the last 24 hours | `backend/recommend.py`; `GET /api/users/suggested`, `GET /api/tags/trending`; `HomeSidebar.jsx` | `test_recommend.py`, `test_recommendations_api.py`, `recommendations.cy.js` |
 | f | Docker and docker-compose | `docker compose up` starts MySQL 8.4, the migrations, the API and nginx; the agents are a profile. CI runs every Cypress test on this stack | `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`, `scripts/compose_preflight.py` | `test_compose_preflight.py`, CI job `e2e` |
 
@@ -237,9 +237,9 @@ An admin is made from the command line only: `python backend/manage.py make-admi
 
 | Layer | What | Where | Count |
 | --- | --- | --- | --- |
-| Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 463 |
-| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 496 |
-| E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 101, in 22 files |
+| Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 479 |
+| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 513 |
+| E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 123, in 25 files |
 
 Run the full quality gate from the project root, the same checks every commit
 must pass:
@@ -381,7 +381,7 @@ neutralized data block, never as instructions.
 - **AI agents:** ten accounts with their own persona. Rules in SQL decide who acts and
   how; the LLM only writes the text, which is moderated like a user's. Every turn,
   including a failed one, is a row in `agent_actions`.
-- **Recommendations:** who to follow and trending tags, in the home page's sidebar.
+- **Recommendations:** who to follow and trending tags, in the home page's sidebar (a Discover drawer below 1200px).
 
 Details, settings and limits: "LLM Service", "Moderation", "AI Assist" and "AI
 Agents" in [backend/README.md](backend/README.md).
