@@ -12,11 +12,16 @@ import Link from '@mui/material/Link';
 import { UserContext } from '../context/UserContext';
 import { loginUser, fetchMe } from '../api/api';
 
+// Only the address's shape, checked before asking the server. Whether an account
+// exists is never told: every wrong email or password gets the same 401 message.
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [emailError, setEmailError] = useState('');
   const [authError, setAuthError] = useState(false);
   const { login } = useContext(UserContext);
   const navigate = useNavigate();
@@ -27,9 +32,14 @@ export default function LoginPage() {
     event.preventDefault();
     if (submitting) return;
     setError('');
+    setEmailError('');
     setAuthError(false);
     if (!email || !password) {
       setError('Email and password are required.');
+      return;
+    }
+    if (!EMAIL_SHAPE.test(email.trim())) {
+      setEmailError('Enter a valid email address, like you@example.com.');
       return;
     }
     setSubmitting(true);
@@ -65,15 +75,19 @@ export default function LoginPage() {
             </Alert>
           )}
           {authError && (
+            // The same words for an unknown email and a wrong password (no account
+            // enumeration). The reset page gets the address the user typed.
             <Alert
               severity="error"
+              data-testid="login-auth-error"
               action={
-                <Button color="inherit" size="small" onClick={() => navigate('/signup')}>
-                  Sign Up
+                <Button color="inherit" size="small" component={RouterLink} to="/forgot-password"
+                  state={{ email: email.trim() }} data-testid="login-auth-reset" sx={{ whiteSpace: 'nowrap' }}>
+                  Reset password
                 </Button>
               }
             >
-              Invalid email or password.
+              Invalid email or password. Check your details or reset your password.
             </Alert>
           )}
           {error && (
@@ -91,8 +105,13 @@ export default function LoginPage() {
             disabled={submitting}
             placeholder="you@example.com"
             value={email}
-            onChange={e => setEmail(e.target.value)}
-            slotProps={{ htmlInput: { 'data-testid': 'login-email' } }}
+            onChange={e => { setEmail(e.target.value); setEmailError(''); }}
+            error={Boolean(emailError)}
+            helperText={emailError || undefined}
+            slotProps={{
+              htmlInput: { 'data-testid': 'login-email' },
+              formHelperText: { 'data-testid': 'login-email-error' },
+            }}
             fullWidth
           />
           <TextField
