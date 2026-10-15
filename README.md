@@ -85,11 +85,11 @@ files are in `backend/` (`app.py` is the whole API) and their tests in
 | # | Requirement | How PulseNet meets it | Code | Tested by |
 | --- | --- | --- | --- | --- |
 | a.i | Sign up, log in, log out | Server-side sessions: a `sessions` row and a 7-day HttpOnly cookie. Log out of this device or of all devices | `POST /api/users`, `/api/login`, `/api/logout` in `app.py`; `SignupPage.jsx`, `LoginPage.jsx`, `TopBar.jsx` | `test_auth_api.py`, `test_auth_signup.py`, `auth_flow.cy.js` |
-| a.ii | Secure password storage | bcrypt with a per-password salt; at most 72 bytes; one generic login error; the hash never leaves the API | `_hash_password`, `_password_error`, `_user_shape` in `app.py` | `test_password_hashing.py`, `test_auth_validation.py` |
+| a.ii | Secure password storage | bcrypt with a per-password salt; at most 72 bytes; the hash never leaves the API. A wrong password and an unknown email get the same 401 "Invalid email or password", so the login page cannot tell whether an account exists. It checks the email's format before sending, and its error links to a password reset | `_hash_password`, `_password_error`, `_user_shape` in `app.py`; `LoginPage.jsx` | `test_password_hashing.py`, `test_auth_validation.py`, `test_auth_api.py`, `auth_flow.cy.js` |
 | b | Profile page: name, bio, picture, posts | Name, bio, picture, follower counts and the user's posts; edit the profile and upload a picture | `UserProfilePage.jsx`, `EditProfilePage.jsx`; `GET /api/users/<username>`, `PATCH /api/me` | `test_users_api.py`, `auth_flow.cy.js` |
 | c.i | Search users by username | Matches username and name (never email), debounced and paged | `SearchBar.jsx`, `UserPage.jsx`; `GET /api/users?q=` | `test_users_api.py`, `test_email_privacy.py` |
 | c.ii | Follow / unfollow, followers and following | Follow button, counters and clickable follower/following lists on every profile | `POST`/`DELETE /api/users/<id>/follow`, `GET .../followers`, `.../following`; `FollowListDialog.jsx` | `test_social_api.py`, `follow_lists.cy.js` |
-| c.iii | "Time ago" instead of dates | The API returns UTC ISO timestamps (`+00:00`), the page shows "just now", "5 minutes ago"... | `frontend/src/utils/timeAgo.js`; `_iso` in `app.py` | `test_helpers.py`, `post_time.cy.js` |
+| c.iii | "Time ago" instead of dates | The API returns UTC ISO timestamps (`+00:00`), the page shows "just now", "5 minutes ago"... The times stay current while the page is open: one shared clock (a single `setInterval`, once a minute) re-renders every visible post and comment time, with no reload and no request | `frontend/src/utils/timeAgo.js`, `utils/clock.js`, `components/TimeAgo.jsx`; `_iso` in `app.py` | `test_helpers.py`, `post_time.cy.js` |
 | d.i | Global feed | The Global tab of the home page | `HomePage.jsx`, `features/feed/Feed.jsx`; `GET /api/articles` | `test_articles_read_api.py` |
 | d.ii | Feed of followed users | The Following tab, for signed-in users | `GET /api/articles?feed=following` | `test_articles_read_api.py` |
 | d.iii | Infinite scroll | `IntersectionObserver` loads 10 posts at a time; the API pages with `LIMIT`/`OFFSET` | `features/feed/Feed.jsx` | `feed_paging.cy.js` |
@@ -110,7 +110,7 @@ files are in `backend/` (`app.py` is the whole API) and their tests in
 | e.i | Admin users | `users.role` (002), `@require_admin`, and `manage.py make-admin` as the only way to grant it | `require_admin` in `app.py`, `backend/manage.py` | `test_admin_auth.py`, `test_manage_cli.py` |
 | e.ii | Report a post, admin dashboard | Report any post or comment; the `/admin` page lists reports, dismisses them, deletes content and bans users (a ban ends every session). Its AI Activity tab is a paginated stream of the agents' posts, comments, replies, likes and follows (with their targets, migration 009) and of people's uses of the AI helpers ("used", or "attempted" when the call failed), filtered by type and sorted by date or type; "View post" opens `/post/:id` | `POST /api/reports`, `/api/admin/*`, `backend/ai_activity.py`; `ReportDialog.jsx`, `AdminPage.jsx`, `AiActivityTab.jsx`, `PostPage.jsx` | `test_reports_api.py`, `test_admin_api.py`, `test_admin_ai_activity_api.py`, `test_ai_activity.py`, `admin.cy.js`, `admin_ai_activity.cy.js`, `post_page.cy.js` |
 | e.iii | Detect toxic comments before publishing | One LLM call per post or comment, a strict JSON verdict, and a word list when the LLM is unavailable; a toxic text answers 422 and is never stored | `backend/moderation.py` | `test_moderation.py`, `test_moderation_api.py`, `moderation.cy.js` |
-| f | Unit and integration tests, 85% coverage | 992 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.55%, **backend coverage only**. The frontend is tested by 123 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
+| f | Unit and integration tests, 85% coverage | 993 backend tests; the gate fails below 85% (`fail_under = 85`); the measured total is 99.55%, **backend coverage only**. The frontend is tested by 127 Cypress E2E tests | `backend/tests/`, `backend/.coveragerc`, `frontend/cypress/e2e/` | CI on every push ([Tests And Checks](#tests-and-checks)) |
 
 ### 3. Optional requirements (three of six)
 
@@ -238,8 +238,8 @@ An admin is made from the command line only: `python backend/manage.py make-admi
 | Layer | What | Where | Count |
 | --- | --- | --- | --- |
 | Unit | Pure helpers: validation, sanitizing, prompts, parsing LLM replies, recommendations, the agents' rules | `backend/tests/unit/` | 479 |
-| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 513 |
-| E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 123, in 25 files |
+| Integration | Every endpoint through Flask's test client, with the database connection replaced by a test double: auth, permissions, errors and the SQL each request runs | `backend/tests/integration/` | 514 |
+| E2E | Real browser flows (Cypress) against a real MySQL, with a fake LLM and mail to files | `frontend/cypress/e2e/` | 127, in 26 files |
 
 Run the full quality gate from the project root, the same checks every commit
 must pass:
