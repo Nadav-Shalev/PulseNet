@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
@@ -13,7 +13,9 @@ import { requestPasswordReset } from '../api/api';
 // Ask for a reset link. The answer is the same whether or not the address has an
 // account, so this page never says which it was.
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
+  // From the login page's "Reset password": the address the user typed there.
+  const typedEmail = useLocation().state?.email;
+  const [email, setEmail] = useState(typeof typedEmail === 'string' ? typedEmail : '');
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState('');
   const [error, setError] = useState('');

@@ -90,6 +90,20 @@ class LoginTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 401)
 
+    def test_unknown_email_and_wrong_password_answer_identically(self):
+        # No account enumeration: the login page cannot tell the two apart.
+        answers = []
+        for row, password in ((None, PASSWORD), (_login_row(), "wrong")):
+            conn = FakeConn(fetchone=[row])
+            with patch_db(conn):
+                resp = client().post("/api/login",
+                                     json={"email": "ada@example.com", "password": password})
+            answers.append((resp.status_code, resp.get_json(), "session_id=" in _set_cookie_header(resp)))
+            self.assertFalse(conn.ran("insert into sessions"))
+
+        self.assertEqual(answers[0], (401, {"error": "Invalid email or password"}, False))
+        self.assertEqual(answers[0], answers[1])
+
     def test_missing_fields_returns_400(self):
         conn = FakeConn()
         with patch_db(conn):
