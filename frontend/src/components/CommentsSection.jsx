@@ -20,7 +20,7 @@ import { UserContext } from '../context/UserContext';
 import { AiSuggestion, useAiAssist } from './AiSuggestion';
 import ReportDialog from './ReportDialog';
 import { textToHtml } from '../utils/textToHtml';
-import { timeAgo } from '../utils/timeAgo';
+import TimeAgo from './TimeAgo';
 
 // The backend's limit on a comment's visible text.
 const MAX_COMMENT_CHARS = 2000;
@@ -210,7 +210,7 @@ export default function CommentsSection({ postId, onCountChange }) {
                 {c.user?.name?.trim() || `@${username}`}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                @{username} · {timeAgo(c.created_at)}
+                @{username} · <TimeAgo value={c.created_at} />
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', mt: -0.5 }}>

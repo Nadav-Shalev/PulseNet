@@ -37,7 +37,7 @@ import { UserContext } from '../context/UserContext';
 import CommentsSection from './CommentsSection';
 import PostBody from './PostBody';
 import ReportDialog from './ReportDialog';
-import { postTimeAgo } from '../utils/timeAgo';
+import TimeAgo from './TimeAgo';
 
 // `manage` enables owner-only controls (delete post, remove a hashtag). It is only
 // passed when the current user views their OWN profile, so it never appears in feeds
@@ -145,10 +145,11 @@ export default function SinglePost({ post, manage = false, onDeleted, onTagsChan
   const authorName = post?.user?.name?.trim();
   // Show the name when present, otherwise @username (never the raw email).
   const displayName = authorName || (authorUsername ? `@${authorUsername}` : 'Unknown');
-  // Secondary line: @username (only if we already showed a name) + time ago.
+  // Secondary line: @username (only if we already showed a name) + time ago, which
+  // the shared minute clock keeps current.
   const metaLine = authorName && authorUsername
-    ? `@${authorUsername} · ${postTimeAgo(post)}`
-    : postTimeAgo(post);
+    ? <>@{authorUsername} · <TimeAgo post={post} /></>
+    : <TimeAgo post={post} />;
   const authorPath = authorUsername ? `/profile/${encodeURIComponent(authorUsername)}` : undefined;
   const goToTag = (tag) => navigate(`/tag/${encodeURIComponent(tag)}`);
 
