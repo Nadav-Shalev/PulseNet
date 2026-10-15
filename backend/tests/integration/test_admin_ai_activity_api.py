@@ -141,9 +141,10 @@ class PageTests(unittest.TestCase):
         self.assertEqual((body["page"], body["per_page"], body["total"], body["has_more"]), (2, 10, 40, True))
 
     def test_the_last_page_has_no_more(self):
-        for page, more in ((1, True), (2, False)):
-            with self.subTest(page=page):
-                resp = self.get(_page([30, 0]), f"?page={page}")
+        # (events in all, page) -> more: 25 events fill page 1 exactly, with none after.
+        for total, page, more in ((30, 1, True), (30, 2, False), (25, 1, False), (26, 1, True)):
+            with self.subTest(total=total, page=page):
+                resp = self.get(_page([total, 0]), f"?page={page}")
                 self.assertIs(resp.get_json()["has_more"], more)
 
     def test_grouped_by_type(self):
