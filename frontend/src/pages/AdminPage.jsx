@@ -27,7 +27,7 @@ import {
 } from '../api/api';
 import AiActivityTab from '../components/AiActivityTab';
 import { UserContext } from '../context/UserContext';
-import { timeAgo } from '../utils/timeAgo';
+import TimeAgo from '../components/TimeAgo';
 
 const reasonLabel = (value) => REPORT_REASONS.find(r => r.value === value)?.label ?? value;
 
@@ -47,7 +47,7 @@ function ReportCard({ report, busy, onAction }) {
         <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 1 }}>
           <Chip size="small" label={isPost ? 'Post' : 'Comment'} />
           <Chip size="small" color="warning" variant="outlined" label={reasonLabel(report.reason)} />
-          <Typography variant="caption" color="text.secondary">{timeAgo(report.created_at)}</Typography>
+          <Typography variant="caption" color="text.secondary"><TimeAgo value={report.created_at} /></Typography>
         </Box>
         <Typography variant="subtitle2">
           {isPost ? target.post_title : <>Comment on &ldquo;{target.post_title}&rdquo;</>}
@@ -67,7 +67,7 @@ function ReportCard({ report, busy, onAction }) {
         )}
         {!open && (
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            Dismissed{report.resolved_by ? ` by @${report.resolved_by}` : ''} {timeAgo(report.resolved_at)}
+            Dismissed{report.resolved_by ? ` by @${report.resolved_by}` : ''} <TimeAgo value={report.resolved_at} />
           </Typography>
         )}
       </CardContent>
